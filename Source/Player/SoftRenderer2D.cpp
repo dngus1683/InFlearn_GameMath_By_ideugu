@@ -55,6 +55,7 @@ void SoftRenderer::LoadScene2D()
 // 게임 로직과 렌더링 로직이 공유하는 변수
 Vector2 currentPosition;
 float currentScale = 10.f;
+float currentDegree = 0.f;			// 현재 각도. radian이 아닌 degree로 구현.
 
 // 게임 로직을 담당하는 함수
 void SoftRenderer::Update2D(float InDeltaSeconds)
@@ -67,27 +68,21 @@ void SoftRenderer::Update2D(float InDeltaSeconds)
 	static float moveSpeed = 100.f;
 	static float scaleMin = 5.f;
 	static float scaleMax = 20.f;
+	static float scaleSpeed = 20.f;
 
-	// ******************** sin함수의 주기성을 활용하여 하트가 커졌다 작아졌다를 반복하는 애니메이션 구현*********************************
-	// 이때, sin함수는 y=sin(2pi*t/T)로, 시간 도메인에서의 sin함수를 사용한다.
-	static float duration = 1.5f;		// 애니메이션의 주기. T
-	static float elapsedTime = 0.f;		// 주기함수의 현재 시간. t
+	static float rotateSpeed = 180.f;		// 하트가 회전하는 각속도. 180도/s로 설정.
 
 	Vector2 inputVector = Vector2(input.GetAxis(InputAxis::XAxis), input.GetAxis(InputAxis::YAxis)).GetNormalize();
 	Vector2 deltaPosition = inputVector * moveSpeed * InDeltaSeconds;
+	float deltaScale = input.GetAxis(InputAxis::ZAxis) * scaleSpeed * InDeltaSeconds;
 
-	// 경과 시간과 sin 한수를 활용한 [0, 1] 값의 생성
-	elapsedTime += InDeltaSeconds;									// 시간의 흐름
-	elapsedTime = Math::FMod(elapsedTime, duration);				// sin함수는 주기함수이기 때문에, t가 주기를 넘었을 때, 다시 0부터 시작해도 함수는 연속된다.(
-	float currentRad = (elapsedTime / duration) * Math::TwoPI;		// 현재 각도 = (2pi*t/T) 표현.
-	float alpha = (sinf(currentRad) + 1) * 0.5f;					// sin은 [-1, 1]의 값을 가지며, 현재 애니메이션 의도는 뒤집어지는 것이 아닌 작아졌다 커지는 것이기 때문에, 
-																	// sin함수의 값을 [0, 1]로 변환할 필요가 있다.
-																	// 때문에, + 1을 통해 [0,2]로 증가시킨 다음, 모든 값들을 절반으로 나눠 [0, 1]이 되도록 한다.
+	float deltaDegree = input.GetAxis(InputAxis::WAxis) * rotateSpeed * InDeltaSeconds;		// Home, End 버튼을 누르면 회전하도록 방향 설정.
 
 	// 물체의 최종 상태 설정
 	currentPosition += deltaPosition;
-	currentScale = Math::Lerp(scaleMin, scaleMax, alpha);			// Lerp는 선형 보간을 시켜주는 함수다.
-																	// 세번째 인자값이 0이면 scaleMin, 1이면 scaleMax, 그 사이 값이라면 scaleMin과 scaleMax 값 사이의 적절한 보간 값을 반환한다.
+	currentScale = Math::Clamp(currentScale + deltaScale, scaleMin, scaleMax);
+
+	currentDegree += deltaDegree;		// 각 변화량을 현재 각도에 더함.
 }
 
 // 렌더링 로직을 담당하는 함수
@@ -122,18 +117,33 @@ void SoftRenderer::Render2D()
 		}
 	}
 
+	// 각도에 해당하는 사인과 코사인 값 얻기
+	float sin = 0.f;
+	float cos = 0.f;
+	Math::GetSinCos(sin, cos, currentDegree);	// sinf, cosf는 rad값을 인자로 받는데, GetSinCos()는 degree값을 인자로 받음.
+
 	// 각 값을 초기화한 후 색상을 증가시키면서 점에 대응
 	rad = 0.f;
 	for (auto const& v : hearts)
 	{
+
+		// 기본 하트 좌표들에, scale -> rotate -> translate 순서로 선형 변환(Linear Transformation) 적용.
+		// 1. 점에 크기를 적용한다.
+		Vector2 scaledV = v * currentScale;
+		// 2. 크기가 변한 점을 회전시킨다.
+		Vector2 rotatedV = Vector2(scaledV.X * cos - scaledV.Y * sin, scaledV.X * sin + scaledV.Y * cos);	// (x', y') = (xcos - ysin, xsin + ycos) 적용.
+		// 3. 회전시킨 점을 이동한다.
+		Vector2 translatedV = rotatedV + currentPosition;
+
 		hsv.H = rad / Math::TwoPI;
-		r.DrawPoint(v * currentScale + currentPosition, hsv.ToLinearColor());
+		r.DrawPoint(translatedV, hsv.ToLinearColor());
 		rad += increment;
 	}
 
 	// 현재 위치와 스케일을 화면에 출력
 	r.PushStatisticText(std::string("Position : ") + currentPosition.ToString());
 	r.PushStatisticText(std::string("Scale : ") + std::to_string(currentScale));
+	r.PushStatisticText(std::string("Degree : ") + std::to_string(currentDegree));
 }
 
 // 메시를 그리는 함수
