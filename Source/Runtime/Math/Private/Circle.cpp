@@ -17,6 +17,7 @@ Circle::Circle(const std::vector<Vector2> InVertices)
 	}
 
 	Center = sum / (float)cnt;
+	float distanceSquared = 0.f;
 	Radius = (*std::max_element(InVertices.begin(), InVertices.end(),
 		[&](Vector2 const& lhs, Vector2 const& rhs)
 	{
