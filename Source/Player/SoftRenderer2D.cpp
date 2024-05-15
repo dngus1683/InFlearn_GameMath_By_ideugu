@@ -53,7 +53,7 @@ void SoftRenderer::LoadScene2D()
 }
 
 // 게임 로직과 렌더링 로직이 공유하는 변수
-Vector2 currentPosition;
+float currentShear = 0.f;		// shearing(밀기 => 평행사변형 꼴 만들기)
 float currentScale = 10.f;
 float currentDegree = 0.f;
 
@@ -65,19 +65,18 @@ void SoftRenderer::Update2D(float InDeltaSeconds)
 	const InputManager& input = g.GetInputManager();
 
 	// 게임 로직의 로컬 변수
-	static float moveSpeed = 100.f;
+	static float shearSpeed = 2.f;
 	static float scaleMin = 5.f;
 	static float scaleMax = 20.f;
 	static float scaleSpeed = 20.f;
 	static float rotateSpeed = 180.f;
 
-	Vector2 inputVector = Vector2(input.GetAxis(InputAxis::XAxis), input.GetAxis(InputAxis::YAxis)).GetNormalize();
-	Vector2 deltaPosition = inputVector * moveSpeed * InDeltaSeconds;
+	float deltaShear = input.GetAxis(InputAxis::XAxis) * shearSpeed * InDeltaSeconds;
 	float deltaScale = input.GetAxis(InputAxis::ZAxis) * scaleSpeed * InDeltaSeconds;
 	float deltaDegree = input.GetAxis(InputAxis::WAxis) * rotateSpeed * InDeltaSeconds;
 
 	// 물체의 최종 상태 설정
-	currentPosition += deltaPosition;
+	currentShear += deltaShear;
 	currentScale = Math::Clamp(currentScale + deltaScale, scaleMin, scaleMax);
 	currentDegree += deltaDegree;
 }
@@ -98,6 +97,8 @@ void SoftRenderer::Render2D()
 	static std::vector<Vector2> hearts;
 	HSVColor hsv(0.f, 1.f, 0.85f);
 
+	static Vector2 pivot(200.f, 0.f);		// 두 하트 간의 간격. 
+
 	// 하트를 구성하는 점 생성
 	if (hearts.empty())
 	{
@@ -114,48 +115,71 @@ void SoftRenderer::Render2D()
 		}
 	}
 
-	
-	// **************************** rotate, scale을 행렬로 계산하기 *************************************
+
+	// ***************************** 하트 함수에 scale, rotate, shear 변환을 행렬로 한꺼번에 적용한 결과와, 역행렬을 변환된 값에 적용한 결과 비교하기 **************************
+	// Scale Matrix
+	Vector2 sBasis1(currentScale, 0.f);
+	Vector2 sBasis2(0.f, currentScale);
+	Matrix2x2 sMatrix(sBasis1, sBasis2);
+
+	// Rotate Matrix
 	float sin = 0.f;
 	float cos = 0.f;
 	Math::GetSinCos(sin, cos, currentDegree);
-
-	// 변환 선형 변환 행렬에서, 각 열벡터(column vector)들은 기저벡터(basis vector)다.
-	// 회전 변환행력의 기저벡터와 행렬
-	// R = [ cos, -sin ]	
-	//     [ sin,  cos ]
 	Vector2 rBasis1(cos, sin);
 	Vector2 rBasis2(-sin, cos);
 	Matrix2x2 rMatrix(rBasis1, rBasis2);
 
-	// 크기 변환행렬의 기저벡터와 행렬
-	// S = [ s1,  0  ]	
-	//     [  0, s2  ] 
-	Vector2 sBasis1 = Vector2::UnitX * currentScale;
-	Vector2 sBasis2 = Vector2::UnitY * currentScale;
-	Matrix2x2 sMatrix(sBasis1, sBasis2);
+	// Shear Matrix		
+	// sh = [ 1, a ]
+	//		[ 0, 1 ]
+	Vector2 shBasis1(1.f, 0.f);
+	Vector2 shBasis2(currentShear, 1.f);
+	Matrix2x2 shMatrix(shBasis1, shBasis2);
 
-	// 크기, 회전의 순서로 진행하는 합성 변환행렬의 계산
-	// 선형변환(Linear Transformation)에서 scaling과 rotating 순서는 상관없다.
-	Matrix2x2 finalMatrix =  sMatrix * rMatrix;
+	// 합성행렬
+	// shear 변환 역시 linear Transformation에 해당되기 때문에, 행렬 곱 순서는 중요치 않다.
+	Matrix2x2 tMatrix = sMatrix * rMatrix * shMatrix;
 
+	// Scale Matrix의 역행렬
+	// 각 scale 역수
+	Vector2 isBasis1(1.f/currentScale, 0.f);
+	Vector2 isBasis2(0.f, 1.f/currentScale);
+	Matrix2x2 isMatrix(isBasis1, isBasis2);
 
-	// 각 값을 초기화한 후 색상을 증가시키면서 점에 대응
+	// Rotate Matrix의 역행렬
+	// rotation의 전치
+	Matrix2x2 irMatrix = rMatrix.Transpose();
+
+	// Shear Matrix의 역행렬
+	// 다른 축 값을 더한 만큼(잡아 늘린만큼) 빼기
+	// sh^-1 = [ 1, -a ]
+	//		   [ 0,  1 ]
+	Vector2 ishBasis1(1.f, 0.f);
+	Vector2 ishBasis2(-currentShear, 1.f);
+	Matrix2x2 ishMatrix(ishBasis1, ishBasis2);
+
+	// 역행렬의 합성행렬
+	Matrix2x2 itMatrix = ishMatrix * irMatrix * isMatrix ;
+	
+
 	rad = 0.f;
 	for (auto const& v : hearts)
 	{
-		// 1. 점에 행렬을 적용한다.
-		Vector2 transformedV = finalMatrix * v;	// 행렬 곱
-		// 2. 변환된 점을 이동한다.
-		Vector2 translateV = transformedV + currentPosition;	// translate은 linear transform이 아니기 때문에 덧셈으로 부여한다.
+		// 왼쪽 하트(Transformation 적용)
+		Vector2 left = tMatrix * v;
+		r.DrawPoint(left - pivot, hsv.ToLinearColor());
+
+		// 오른쪽 하트(왼쪽 하트에 추가로 역행렬 적용)
+		Vector2 right = itMatrix * left;
+		r.DrawPoint(right + pivot, hsv.ToLinearColor());
 
 		hsv.H = rad / Math::TwoPI;
-		r.DrawPoint(translateV, hsv.ToLinearColor());
 		rad += increment;
 	}
 
-	// 현재 위치, 크기, 각도를 화면에 출력
-	r.PushStatisticText(std::string("Position : ") + currentPosition.ToString());
+	// 현재 밀기, 스케일, 회전각을 화면에 출력
+	r.PushStatisticText(std::string("Shear : ") + std::to_string(currentShear));
 	r.PushStatisticText(std::string("Scale : ") + std::to_string(currentScale));
 	r.PushStatisticText(std::string("Degree : ") + std::to_string(currentDegree));
 }
