@@ -17,8 +17,6 @@ Sphere::Sphere(const std::vector<Vector3>& InVertices)
 	}
 
 	Center = sum / (float)cnt;
-	float distanceSquared = 0.f;
-	Center = sum / (float)cnt;
 	Vector3 farthestPoint = (*std::max_element(InVertices.begin(), InVertices.end(),
 		[&](Vector3 const& lhs, Vector3 const& rhs)
 		{

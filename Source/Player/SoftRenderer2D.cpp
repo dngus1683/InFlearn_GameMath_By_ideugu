@@ -53,7 +53,7 @@ void SoftRenderer::LoadScene2D()
 }
 
 // 게임 로직과 렌더링 로직이 공유하는 변수
-Vector2 CurrentPosition(100.f, 100.f);
+Vector2 currentPosition(100.f, 100.f);
 
 // 게임 로직을 담당하는 함수
 void SoftRenderer::Update2D(float InDeltaSeconds)
@@ -63,15 +63,13 @@ void SoftRenderer::Update2D(float InDeltaSeconds)
 	const InputManager& input = g.GetInputManager();
 
 	// 게임 로직의 로컬 변수
-	// 한번 선언한 변수는 계속 지속되도록 static 선언.
-	static float MovingVelocity = 100.f;
+	static float moveSpeed = 100.f;
 
-	// 단위 시간동안 점이 움직이는 거리 구하기
-	Vector2 InputVector = Vector2(input.GetAxis(InputAxis::XAxis), input.GetAxis(InputAxis::YAxis));	// 입력에 따른 방향벡터 구하기
-	Vector2 DeltaPosition = InputVector * MovingVelocity * InDeltaSeconds;	// 방향 벡터와 속력(스칼라), delta 시간을 곱하면서, 매 프레임마다 이동할 거리 구하기
+	Vector2 inputVector = Vector2(input.GetAxis(InputAxis::XAxis), input.GetAxis(InputAxis::YAxis)).GetNormalize();	// 만약, X축과 Y축 모두 눌렀다면, (1, 1) -> sqrt(2) 만큼의 속도로 움직이며, 이는 1보다 크기에 움직임에 통일성을 위해 정규화한다.
+	Vector2 deltaPosition = inputVector * moveSpeed * InDeltaSeconds;
 
-	// 매 프레임(시간)마다 delta위치(속도)를 더해 (속도 x 시간 = 위치) 매 위치 초기화하기. 
-	CurrentPosition += DeltaPosition;
+	// 물체의 최종 상태 설정
+	currentPosition += deltaPosition;
 }
 
 // 렌더링 로직을 담당하는 함수
@@ -85,26 +83,31 @@ void SoftRenderer::Render2D()
 	DrawGizmo2D();
 
 	// 렌더링 로직의 로컬 변수
-	static float LineLength = 500.f;
+	static const float radius = 50.f;	// 반지름 설정
+	static std::vector<Vector2> Circles;	// 원을 구성하는 모든 점을 담을 vector 초기화
 
-	// 원점으로부터 현재 위치보다 넉넉히 긴(LineLength 배 만큼) 연장선 그리기.
-	Vector2 LineStart = CurrentPosition * LineLength;
-	Vector2 LineEnd = CurrentPosition * -LineLength;
-	r.DrawLine(LineStart, LineEnd, LinearColor::LightGray);
+	// 원에 해당하는 점들 선별
+	// 앞서 설정한 반지름을 갖는 원이, 외접하는 정사각형 내의 모든 점들을 확인. -> 원점으로부터 해당 점까지의 길이가 반지름보다 작거나 같다면 원의 구성요소로 포함.
+	if (Circles.empty());
+	for (float x = -radius; x <= radius; ++x)
+	{
+		for (float y = -radius; y <= radius; ++y)
+		{
+			Vector2 TmpVector(x, y);
+			if (TmpVector.SizeSquared() <= radius * radius)	// 제곱값으로 비교를 한다면, 루트를 씌우는 계산을 하지않기 때문에 시간적으로 경제적이다.
+			{
+				Circles.push_back(TmpVector);
+			}
 
-	// 가시성을 위해, 현재 위치뿐만 아니라 주변 위치(현재 위치 기준 8방향)에도 점을 그리기.
-	r.DrawPoint(CurrentPosition, LinearColor::Blue);
-	r.DrawPoint(CurrentPosition + Vector2::UnitX, LinearColor::Blue);
-	r.DrawPoint(CurrentPosition - Vector2::UnitX, LinearColor::Blue);
-	r.DrawPoint(CurrentPosition + Vector2::UnitY, LinearColor::Blue);
-	r.DrawPoint(CurrentPosition - Vector2::UnitY, LinearColor::Blue);
-	r.DrawPoint(CurrentPosition + Vector2::One, LinearColor::Blue);
-	r.DrawPoint(CurrentPosition - Vector2::One, LinearColor::Blue);
-	r.DrawPoint(CurrentPosition + Vector2(1, -1), LinearColor::Blue);
-	r.DrawPoint(CurrentPosition - Vector2(1, -1), LinearColor::Blue);
+		}
+	}
 
-	// 좌표값 출력
-	r.PushStatisticText("Coordinate : " + CurrentPosition.ToString());
+	for (auto const& v : Circles)
+	{
+		r.DrawPoint(v + currentPosition, LinearColor::Blue);	// 원을 구성하는 모든 점 그리기.
+	}
+
+	r.PushStatisticText("Coordinate : " + currentPosition.ToString());
 }
 
 // 메시를 그리는 함수
