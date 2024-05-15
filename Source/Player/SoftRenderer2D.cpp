@@ -53,8 +53,8 @@ void SoftRenderer::LoadScene2D()
 }
 
 // 게임 로직과 렌더링 로직이 공유하는 변수
-Vector2 CurrentPosition;	// 하트 중심점 위치
-float CurrentScale = 10.f;	// 하트의 크기 배율
+Vector2 currentPosition;
+float currentScale = 10.f;
 
 // 게임 로직을 담당하는 함수
 void SoftRenderer::Update2D(float InDeltaSeconds)
@@ -64,18 +64,18 @@ void SoftRenderer::Update2D(float InDeltaSeconds)
 	const InputManager& input = g.GetInputManager();
 
 	// 게임 로직의 로컬 변수
-	static float MoveSpeed = 100.f;
-	static float ScaleMin = 5.f;
-	static float ScaleMax = 20.f;
-	static float ScaleSpeed = 20.f;
+	static float moveSpeed = 100.f;
+	static float scaleMin = 5.f;
+	static float scaleMax = 20.f;
+	static float scaleSpeed = 20.f;
 
-	Vector2 InputVector = Vector2(input.GetAxis(InputAxis::XAxis), input.GetAxis(InputAxis::YAxis)).GetNormalize();
-	Vector2 DeltaPosition = InputVector * MoveSpeed * InDeltaSeconds;
-	float DeltaScale = input.GetAxis(InputAxis::ZAxis) * ScaleSpeed * InDeltaSeconds;
+	Vector2 inputVector = Vector2(input.GetAxis(InputAxis::XAxis), input.GetAxis(InputAxis::YAxis)).GetNormalize();
+	Vector2 deltaPosition = inputVector * moveSpeed * InDeltaSeconds;
+	float deltaScale = input.GetAxis(InputAxis::ZAxis) * scaleSpeed * InDeltaSeconds;
 
 	// 물체의 최종 상태 설정
-	CurrentPosition += DeltaPosition;
-	CurrentScale = Math::Clamp(CurrentScale + DeltaScale, ScaleMin, ScaleMax);	// Clamp 함수는, 주어진 변수가 지정해준 최솟값과 최댓값을 넘기지 못하도록 집어주는 함수다.
+	currentPosition += deltaPosition;
+	currentScale = Math::Clamp(currentScale + deltaScale, scaleMin, scaleMax);
 }
 
 // 렌더링 로직을 담당하는 함수
@@ -93,29 +93,36 @@ void SoftRenderer::Render2D()
 	static float increment = 0.001f;
 	static std::vector<Vector2> hearts;
 
+	HSVColor hsv(0.f, 1.f, 0.85f);			// HSVColor 구조체를 통해 HSV(Hue: 색상, Saturation: 채도, Value: 명도) 색상 인스턴스 생성.
+
 	// 하트를 구성하는 점 생성
 	if (hearts.empty())
 	{
-		for (rad = 0.f; rad < Math::TwoPI; rad += increment)	// 0도에서 한 바퀴 돌아 360도까지 계산.
+		for (rad = 0.f; rad < Math::TwoPI; rad += increment)
 		{
-			// 하트 방정식
-			// x와 y를 구하기.
 			float sin = sinf(rad);
-			float cos[4] = { cosf(rad), cosf(2*rad), cosf(3 * rad) , cosf(4 * rad) };
-			float x = 16 * sin * sin * sin;	// 하트 방정식 x 식
-			float y = 13 * cos[0] - 5 * cos[1] - 2 * cos[2] - cos[3]; // 하트 방정식 y식
-			hearts.push_back(Vector2(x, y));	// 위 식을 통해 도출된 좌표값을 하트 컨테이너에 추가.
+			float cos = cosf(rad);
+			float cos2 = cosf(2 * rad);
+			float cos3 = cosf(3 * rad);
+			float cos4 = cosf(4 * rad);
+			float x = 16.f * sin * sin * sin;
+			float y = 13 * cos - 5 * cos2 - 2 * cos3 - cos4;
+			hearts.push_back(Vector2(x, y));
 		}
 	}
 
+	rad = 0.f;
 	for (auto const& v : hearts)
 	{
-		r.DrawPoint(v * CurrentScale  + CurrentPosition, LinearColor::Blue);	// 위치를 이동시킬 때는 모양을 건드는 것이 아닌, 모든 좌표값들이 동일하게 위치값만 바뀌는 것이기 때문에 더한다.
-																				// scale이나 rotate와 같이 모양과 자세를 건드는 것은 모든 좌표값들에 동일한 값이 계산되지 않고, 선형 변환의 식에 따라 변하기 때문에 곱셈으로 적용한다.
+		// 각 점의 위상에 따른 H 값 부여하기
+		hsv.H = rad / Math::TwoPI;									// 해당 구조체의 HSV 값은 모두 [0,1]로 정규화되어 있으므로, 현재 rad값을 2pi로 나눠 [0,1]로 정규화 한다.
+		r.DrawPoint(v * currentScale + currentPosition, hsv.ToLinearColor());	// 구조체 내부 함수 ToLinearColor()를 통해 HSV -> LinearColor(RGBA)로 변환한다.
+		rad += increment;
 	}
 
-	r.PushStatisticText("Position : " + CurrentPosition.ToString());
-	r.PushStatisticText("Scale : " + std::to_string(CurrentScale));
+	// 현재 위치와 스케일을 화면에 출력
+	r.PushStatisticText(std::string("Position : ") + currentPosition.ToString());
+	r.PushStatisticText(std::string("Scale : ") + std::to_string(currentScale));
 }
 
 // 메시를 그리는 함수
