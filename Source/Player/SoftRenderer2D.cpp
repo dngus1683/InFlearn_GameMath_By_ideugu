@@ -53,11 +53,9 @@ void SoftRenderer::LoadScene2D()
 }
 
 // 게임 로직과 렌더링 로직이 공유하는 변수
-float fovAngle = 60.f;							// 플레이어의 시야각
-Vector2 playerPosition(0.f, 0.f);				// 플레이어의 위치
-LinearColor playerColor = LinearColor::Gray;	// 플레이어의 색상
-Vector2 targetPosition(0.f, 100.f);				// 목표물의 위치
-LinearColor targetColor = LinearColor::Blue;	// 목표물의 색상
+Vector2 lightPosition(200.f, 0.f);											// 광원 위치.
+LinearColor lightColor;														// 빛 색상.
+Vector2 circlePosition;														// 원 위치.
 
 // 게임 로직을 담당하는 함수
 void SoftRenderer::Update2D(float InDeltaSeconds)
@@ -67,62 +65,29 @@ void SoftRenderer::Update2D(float InDeltaSeconds)
 	const InputManager& input = g.GetInputManager();
 
 	// 게임 로직의 로컬 변수
-	static float moveSpeed = 100.f;
-	static std::random_device rd;												// random_device를 통해 시드값을 얻음.
-	static std::mt19937 mt(rd());												// random_device를 통해 얻은 시드값을 통해 난수 생성 엔진을 초기화.
-	static std::uniform_real_distribution<float> randomPosX(-300.f, 300.f);		// -300부터 300까지 균등하게 생성되도록 하는 실수 난수 생성 균등 분포 정의.
-	static std::uniform_real_distribution<float> randomPosY(-200.f, 200.f);		// -200부터 200까지 균등하게 생성되도록 하는 실수 난수 생성 균등 분포 정의.
-	static float duration = 3.f;
+	static float duration = 20.f;
 	static float elapsedTime = 0.f;
-	static Vector2 targetStart = targetPosition;								// 목표물 시작 위치 설정.
-	static Vector2 targetDestination = Vector2(randomPosX(mt), randomPosY(mt));	// 목표물의 랜덤 목표 위치.
+	static float currentDegree = 0.f;
+	static float lightDistance = 200.f;
+	static HSVColor lightHSVColor;
 
-	// 시야각의 cos 값은 최초 1회만 계산해 보관한다.
-	static float halfFovCos = cosf(Math::Deg2Rad(fovAngle * 0.5f));				// 플레이어의 정면과 플레이어 기준 목표물의 방향이 이루는 각이, 플레이어 시야각의 절반 각과 비교되기 때문.
+	// 경과 시간에 따른 현재 각과 이를 사용한 [0,1]값의 생성
+	elapsedTime += InDeltaSeconds;
+	elapsedTime = Math::FMod(elapsedTime, duration);						// mod 계산을 통해 경과 시간이 duration을 넘지 않도록 함. 
+	float currentRad = (elapsedTime / duration) * Math::TwoPI;				// 경과 시간에 비례하여 현재 각 계산. == radian 값.
+	float alpha = (sinf(currentRad) + 1) * 0.5f;							// sin함수를 활용하여 현재 각에 따른 [0,1]사이의 값 얻음.
 
-	elapsedTime = Math::Clamp(elapsedTime + InDeltaSeconds, 0.f, duration);		// 경과 시간이 duration을 넘지 않도록 clamp함.
+	// [0,1]을 활용해 주기적으로 크기를 반복하기
+	currentDegree = Math::Lerp(0.f, 360.f, alpha);							// Lerp를 통해, 위에서 구한 [0,1]값에 따른 currentDegree 값 보간. == (radian => degree) 값 변환
 
-	// 지정한 시간이 경과하면 새로운 이동 지점을 랜덤하게 설정
-	if (elapsedTime == duration)
-	{
-		targetStart = targetDestination;
-		targetPosition = targetDestination;
-		targetDestination = Vector2(randomPosX(mt), randomPosY(mt));
+	// 광원의 좌표와 색상
+	float sin = 0.f;
+	float cos = 0.f;
+	Math::GetSinCos(sin, cos, currentRad);
+	lightPosition = Vector2(cos, sin) * lightDistance;						// 각도에 따른 데카르트 좌표값({cos, sin})을 얻고 이에 길이를 곱해 최종 광원 위치 업데이트.
 
-		elapsedTime = 0.f;
-	}
-	else // 비율에 따라 목표지점까지 선형보간하면서 이동
-	{
-		float ratio = elapsedTime / duration;
-
-		// Lerp함수를 통해 선형 보간 구현.
-		targetPosition = Vector2(
-			Math::Lerp(targetStart.X, targetDestination.X, ratio),
-			Math::Lerp(targetStart.Y, targetDestination.Y, ratio)
-		);
-	}
-
-	Vector2 inputVector = Vector2(input.GetAxis(InputAxis::XAxis), input.GetAxis(InputAxis::YAxis)).GetNormalize();
-	Vector2 deltaPosition = inputVector * moveSpeed * InDeltaSeconds;
-
-	Vector2 f = Vector2::UnitY;										// 플레이어 시야방향. 해당 실습에는 시야방향을 y축으로 고정.
-	Vector2 v = (targetPosition - playerPosition).GetNormalize();	// 플레이어 위치에서 목표물 위치로 가는 방향의 단위 벡터.
-
-	// 물체의 최종 상태 설정
-	if (v.Dot(f) >= halfFovCos)										// 플레이어 시야 벡터와, 목표물 방향의 벡터 간의 내적값이 (시야각 % 2) 보다 클 경우 == 시야각 안에 목표물이 있는 경우.
-	{
-																	// 플레이어와 목표물의 색상을 Red로.
-		playerColor = LinearColor::Red;
-		targetColor = LinearColor::Red;
-	}
-	else
-	{
-																	// 내적값이 (시야각 % 2) 보다 작을 경우 == 시야각 외부에 목표물이 있는 경우.
-																	// 플레이어와 목표물 색상을 각각 Gray, Blue로.
-		playerColor = LinearColor::Gray;			
-		targetColor = LinearColor::Blue;
-	}
-	playerPosition += deltaPosition;
+	lightHSVColor.H = currentRad * Math::InvPI * 0.5f;						// 현재 각도를 360도로 나눠 [0,1] 값으로 정규화.
+	lightColor = lightHSVColor.ToLinearColor();								// HSV -> RGBA.
 }
 
 // 렌더링 로직을 담당하는 함수
@@ -133,50 +98,69 @@ void SoftRenderer::Render2D()
 	const auto& g = Get2DGameEngine();
 
 	// 렌더링 로직의 로컬 변수
-	static float radius = 5.f;									// 플레이어와 목표물을 표현할 원의 반지름.
-	static std::vector<Vector2> sphere;							// 플레이어와 목표물을 표현할 원.
-	static float sightLength = 300.f;							// 시야각 보조선 길이.
+	static std::vector<Vector2> light;
+	static float lightRadius = 10.f;
+	static std::vector<Vector2> circle;
+	static float circleRadius = 50.f;
 
-
-	// 반지름을 기준으로 원의 점들 정의.
-	if (sphere.empty())
+	// 광원을 표현하는 구체
+	// 원 그리는 함수와 동일.
+	if (light.empty())
 	{
-		for (float x = -radius; x <= radius; ++x)
+		float lightRadius = 10.f;
+		for (float x = -lightRadius; x <= lightRadius; ++x)
 		{
-			for (float y = -radius; y <= radius; ++y)
+			for (float y = -lightRadius; y <= lightRadius; ++y)
 			{
 				Vector2 target(x, y);
 				float sizeSquared = target.SizeSquared();
-				float rr = radius * radius;
+				float rr = lightRadius * lightRadius;
 				if (sizeSquared < rr)
 				{
-					sphere.push_back(target);
+					light.push_back(target);
 				}
 			}
 		}
 	}
 
-	// 플레이어 렌더링. 
-	float halfFovSin = 0.f, halfFovCos = 0.f;
-	Math::GetSinCos(halfFovSin, halfFovCos, fovAngle * 0.5f);				// 시야각 보조선을 그리기 위해, 시야각 절반의 sin, cos 정의.
-
-	r.DrawLine(playerPosition, playerPosition + Vector2(sightLength * halfFovSin, sightLength * halfFovCos), playerColor);	// (sin, cos)이 y축 기준 우측상단으로 향하는 시야각 보조선의 단위벡터
-	r.DrawLine(playerPosition, playerPosition + Vector2(-sightLength * halfFovSin, sightLength * halfFovCos), playerColor); // (-sin, cos)이 y축 기준 좌측상단으로 향하는 시야각 보조선의 단위벡터
-	r.DrawLine(playerPosition, playerPosition + Vector2::UnitY * sightLength * 0.2f, playerColor);							// 플레이어 정면 벡터. y축 고정.
-	for (auto const& v : sphere)
+	// 빛을 받는 물체
+	// 원 그리는 함수와 동일.
+	if (circle.empty())
 	{
-		r.DrawPoint(v + playerPosition, playerColor);
+		for (float x = -circleRadius; x <= circleRadius; ++x)
+		{
+			for (float y = -circleRadius; y <= circleRadius; ++y)
+			{
+				Vector2 target(x, y);
+				float sizeSquared = target.SizeSquared();
+				float rr = circleRadius * circleRadius;
+				if (sizeSquared < rr)
+				{
+					circle.push_back(target);
+				}
+			}
+		}
 	}
 
-	// 타겟 렌더링
-	for (auto const& v : sphere)
+	// 광원 그리기
+	static float lightLineLength = 50.f;
+	r.DrawLine(lightPosition, lightPosition - lightPosition.GetNormalize() * lightLineLength, lightColor);			// 광원에서 물체를 향한 방향으로 50만큼의 길이의 선분 그리기.
+	for (auto const& v : light)
 	{
-		r.DrawPoint(v + targetPosition, targetColor);
+		r.DrawPoint(v + lightPosition, lightColor);
 	}
 
-	// 주요 정보 출력
-	r.PushStatisticText(std::string("Player Position : ") + playerPosition.ToString());
-	r.PushStatisticText(std::string("Target Position : ") + targetPosition.ToString());
+	// 광원을 받는 구체의 모든 픽셀에 NdotL을 계산해 음영을 산출하고 이를 최종 색상에 반영
+	for (auto const& v : circle)
+	{
+		Vector2 n = (v - circlePosition).GetNormalize();						// 원의 중심에서 원을 이루는 점을 바라보는 뱡향으로의 법선 벡터.
+		Vector2 l = (lightPosition - v).GetNormalize();							// 원을 이루는 점에서 광원을 바라보는 방향의 광원 벡터.
+		float shading = Math::Clamp(n.Dot(l), 0.f, 1.f);						// 두 벡터가 이루는 각에 따라 해당 물체의 해당 위치에 빛이 얼마나 받는지를 내적값(cos값)으로 계산.
+		r.DrawPoint(v, lightColor*shading);										// cos값([0,1])에 따라 광원의 세기 조절.
+	}
+
+	// 현재 조명의 위치를 화면에 출력
+	r.PushStatisticText(std::string("Position : ") + lightPosition.ToString());
 }
 
 // 메시를 그리는 함수
