@@ -53,9 +53,9 @@ void SoftRenderer::LoadScene2D()
 }
 
 // 게임 로직과 렌더링 로직이 공유하는 변수
-Vector2 point(0.f, 250.f);									// 점의 위치.
-Vector2 lineStart(-400.f, 0.f);								// 점이 투영할 선의 시작점
-Vector2 lineEnd(400.f, 0.f);								// 점이 투영할 선의 끝점.
+Vector2 currentPosition;
+float currentScale = 100.f;
+float currentDegree = 0.f;
 
 // 게임 로직을 담당하는 함수
 void SoftRenderer::Update2D(float InDeltaSeconds)
@@ -65,29 +65,21 @@ void SoftRenderer::Update2D(float InDeltaSeconds)
 	const InputManager& input = g.GetInputManager();
 
 	// 게임 로직의 로컬 변수
-	static float duration = 6.f;
-	static float elapsedTime = 0.f;
-	static float currentDegree = 0.f;
+	static float moveSpeed = 100.f;
+	static float scaleMin = 50.f;
+	static float scaleMax = 200.f;
+	static float scaleSpeed = 100.f;
 	static float rotateSpeed = 180.f;
-	static float distance = 250.f;
-	static std::random_device rd;											// 난수를 생성할 때 사용될 시드값을 얻음.
-	static std::mt19937 mt(rd());											// rt를 통해 생성한 시드값을 통해 난수를 생성하는 난수 생성 엔진 초기화.
-	static std::uniform_real_distribution<float> randomY(-200.f, 200.f);	// 200부터 200까지 균등하게 생성되도록 하는 실수 난수 생성 균등 분포 정의.
-																			// 이를 활용하여, 선을 구성하는 두 점의 y값 랜덤 생성.
-	elapsedTime = Math::Clamp(elapsedTime + InDeltaSeconds, 0.f, duration);
-	if (elapsedTime == duration)
-	{
-		// 난수 생성 함수를 통해, 선을 구성하는 두 점의 y값 랜덤 생성.
-		lineStart = Vector2(-400.f, randomY(mt));
-		lineEnd = Vector2(400.f, randomY(mt));
-		elapsedTime = 0.f;
-	}
 
-	currentDegree = Math::FMod(currentDegree + rotateSpeed * InDeltaSeconds, 360.f);	// 주어진 각속도에 따른 현재 점의 위치 각도.
-	float sin = 0.f;
-	float cos = 0.f;
-	Math::GetSinCos(sin, cos, currentDegree);
-	point = Vector2(cos, sin) * distance;												// 현재 각도에 따른 단위 벡터를 구해 dist와 곱하여 데카르트 좌표값 계산.
+	Vector2 inputVector = Vector2(input.GetAxis(InputAxis::XAxis), input.GetAxis(InputAxis::YAxis)).GetNormalize();
+	Vector2 deltaPosition = inputVector * moveSpeed * InDeltaSeconds;
+	float deltaScale = input.GetAxis(InputAxis::ZAxis) * scaleSpeed * InDeltaSeconds;
+	float deltaDegree = input.GetAxis(InputAxis::WAxis) * rotateSpeed * InDeltaSeconds;
+
+	// 물체의 최종 상태 설정
+	currentPosition += deltaPosition;
+	currentScale = Math::Clamp(currentScale + deltaScale, scaleMin, scaleMax);
+	currentDegree += deltaDegree;
 }
 
 // 렌더링 로직을 담당하는 함수
@@ -97,58 +89,75 @@ void SoftRenderer::Render2D()
 	auto& r = GetRenderer();
 	const auto& g = Get2DGameEngine();
 
-	// 렌더링 로직의 로컬 변수
-	static float radius = 5.f;
-	static std::vector<Vector2> circle;
+	// 배경에 격자 그리기
+	DrawGizmo2D();
 
-	// 원 구성하는 로직을 사용하여 점 정의.
-	if (circle.empty())
+	// ***************************************** vertex를 통해 wireframe rendering 구현하기 **********************************
+	// 메시 데이터의 선언
+	static constexpr float squareHalfSize = 0.5;								// 두 개의 폴리곤을 이어붙여서 한 변의 길이가 1인 정사각형을 만든다. 이때, 한 변의 절반의 길이 저장.
+	static constexpr size_t vertexCount = 4;									// vertex가 총 4개 ( 사각형 4개의 꼭짓점)
+	static constexpr size_t triangleCount = 2;									// 총 polygon 수 2개.
+
+	// 메시를 구성하는 정점 배열과 인덱스 배열의 생성
+	// vertex array - 각 정점의 정보 저장
+	static constexpr std::array<Vertex2D, vertexCount> rawVertices = {
+		Vertex2D(Vector2(-squareHalfSize, -squareHalfSize)),					// 좌측 하단 정점
+		Vertex2D(Vector2(squareHalfSize, -squareHalfSize)),						// 우측 하단 정점
+		Vertex2D(Vector2(squareHalfSize, squareHalfSize)),						// 우측 상단 정점
+		Vertex2D(Vector2(-squareHalfSize, squareHalfSize))						// 좌측 상단 정점
+	};
+
+	// Index array - 각 polygon이 가지는 vertex의 인덱스 저장. 
+	// 이때, 인덱스 저장 순서는 삼각형 기준 반시계(Counter Clock Wise)
+	static constexpr std::array<size_t, triangleCount * 3> indices = {
+		0, 1, 2,
+		0, 2, 3
+	};
+
+	// 아핀 변환 행렬 ( 크기 ) 
+	Vector3 sBasis1(currentScale, 0.f, 0.f);
+	Vector3 sBasis2(0.f, currentScale, 0.f);
+	Vector3 sBasis3 = Vector3::UnitZ;
+	Matrix3x3 sMatrix(sBasis1, sBasis2, sBasis3);
+
+	// 아핀 변환 행렬 ( 회전 ) 
+	float sin = 0.f, cos = 0.f;
+	Math::GetSinCos(sin, cos, currentDegree);
+	Vector3 rBasis1(cos, sin, 0.f);
+	Vector3 rBasis2(-sin, cos, 0.f);
+	Vector3 rBasis3 = Vector3::UnitZ;
+	Matrix3x3 rMatrix(rBasis1, rBasis2, rBasis3);
+
+	// 아핀 변환 행렬 ( 이동 ) 
+	Vector3 tBasis1 = Vector3::UnitX;
+	Vector3 tBasis2 = Vector3::UnitY;
+	Vector3 tBasis3(currentPosition.X, currentPosition.Y, 1.f);
+	Matrix3x3 tMatrix(tBasis1, tBasis2, tBasis3);
+
+	// 모든 아핀 변환을 곱한 합성 행렬. 크기-회전-이동 순으로 적용
+	Matrix3x3 finalMatrix = tMatrix * rMatrix * sMatrix;
+
+	// 행렬을 적용한 메시 정보를 사용해 물체를 렌더링
+	static std::vector<Vertex2D> vertices(vertexCount);
+	for (size_t vi = 0; vi < vertexCount; vi++)
 	{
-		for (float x = -radius; x <= radius; ++x)
-		{
-			for (float y = -radius; y <= radius; ++y)
-			{
-				Vector2 target(x, y);
-				float sizeSquared = target.SizeSquared();
-				float rr = radius * radius;
-				if (sizeSquared < rr)
-				{
-					circle.push_back(target);
-				}
-			}
-		}
+		vertices[vi].Position = finalMatrix * rawVertices[vi].Position;		// 모든 정점에 아핀 변환 적용.
 	}
 
-	// 붉은 색으로 점 그리기
-	for (auto const& v : circle)
+	// 변환된 정점을 잇는 선 그리기
+	for (size_t ti = 0; ti < triangleCount; ti++)
 	{
-		r.DrawPoint(v + point, LinearColor::Red);		// 원으로 된 점 그리기.
+		size_t bi = ti * 3;													// 한 삼각형을 그리는데 3개의 인덱스가 쓰이므로, 다음 삼각형을 그릴 때는 인덱스가 전보다 3 증가되어 있다.
+		// 각 정점들을 인덱스 순서에 맞게 선을 이음.
+		r.DrawLine(vertices[indices[bi]].Position, vertices[indices[bi + 1]].Position, _WireframeColor);
+		r.DrawLine(vertices[indices[bi+1]].Position, vertices[indices[bi + 2]].Position, _WireframeColor);
+		r.DrawLine(vertices[indices[bi+2]].Position, vertices[indices[bi]].Position, _WireframeColor);
 	}
 
-	// 투영할 라인 그리기
-	r.DrawLine(lineStart, lineEnd, LinearColor::Black);			// 점에서 투영할 선 그리기.
-	r.DrawLine(lineStart, point, LinearColor::Red);				// 점과 투영할 선의 각도를 표현할 선 그리기.
-
-	// 투영된 위치와 거리 계산
-	Vector2 unitV = (lineEnd - lineStart).GetNormalize();		// 투영할 선의 단위 벡터.
-	Vector2 u = point - lineStart;								// 벡터 v에 투영될 벡터 u.
-	Vector2 projV = unitV * (u.Dot(unitV));						// 벡터 v에 투영된 벡터. => 방향은 벡터 v이며 크기는 ||u||cos 이기 때문에, u는 정규화 하지 않고 u와 unitV의 내적값을 구하면 정사영 선의 길이가 된다.
-	Vector2 projectedPoint = lineStart + projV;					// 투영된 벡터의 시작점을 지정해줘서 최종적으로 투영된 벡터.
-	float distance = (projectedPoint - point).Size();			// 투영된 벡터에서 점까지의 거리를 구하면, 이 값은 해당 점과 선 사이의 거리가 된다.
-
-	// 투영된 점 그리기
-	for (auto const& v : circle)
-	{
-		r.DrawPoint(v + projectedPoint, LinearColor::Magenta);
-	}
-
-	// 투영 라인 그리기
-	r.DrawLine(projectedPoint, point, LinearColor::Gray);
-
-	// 관련 데이터 화면 출력
-	r.PushStatisticText("Point : " + point.ToString());
-	r.PushStatisticText("Projected Point : " + projectedPoint.ToString());
-	r.PushStatisticText("Distance : " + std::to_string(distance));
+	// 현재 위치, 크기, 각도를 화면에 출력
+	r.PushStatisticText(std::string("Position : ") + currentPosition.ToString());
+	r.PushStatisticText(std::string("Scale : ") + std::to_string(currentScale));
+	r.PushStatisticText(std::string("Degree : ") + std::to_string(currentDegree));
 }
 
 // 메시를 그리는 함수
