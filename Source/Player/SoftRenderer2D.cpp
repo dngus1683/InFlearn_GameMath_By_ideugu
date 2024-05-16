@@ -53,9 +53,11 @@ void SoftRenderer::LoadScene2D()
 }
 
 // 게임 로직과 렌더링 로직이 공유하는 변수
-Vector2 currentPosition;
-float currentScale = 10.f;
-float currentDegree = 0.f;
+float fovAngle = 60.f;							// 플레이어의 시야각
+Vector2 playerPosition(0.f, 0.f);				// 플레이어의 위치
+LinearColor playerColor = LinearColor::Gray;	// 플레이어의 색상
+Vector2 targetPosition(0.f, 100.f);				// 목표물의 위치
+LinearColor targetColor = LinearColor::Blue;	// 목표물의 색상
 
 // 게임 로직을 담당하는 함수
 void SoftRenderer::Update2D(float InDeltaSeconds)
@@ -66,20 +68,61 @@ void SoftRenderer::Update2D(float InDeltaSeconds)
 
 	// 게임 로직의 로컬 변수
 	static float moveSpeed = 100.f;
-	static float scaleMin = 5.f;
-	static float scaleMax = 20.f;
-	static float scaleSpeed = 20.f;
-	static float rotateSpeed = 180.f;
+	static std::random_device rd;												// random_device를 통해 시드값을 얻음.
+	static std::mt19937 mt(rd());												// random_device를 통해 얻은 시드값을 통해 난수 생성 엔진을 초기화.
+	static std::uniform_real_distribution<float> randomPosX(-300.f, 300.f);		// -300부터 300까지 균등하게 생성되도록 하는 실수 난수 생성 균등 분포 정의.
+	static std::uniform_real_distribution<float> randomPosY(-200.f, 200.f);		// -200부터 200까지 균등하게 생성되도록 하는 실수 난수 생성 균등 분포 정의.
+	static float duration = 3.f;
+	static float elapsedTime = 0.f;
+	static Vector2 targetStart = targetPosition;								// 목표물 시작 위치 설정.
+	static Vector2 targetDestination = Vector2(randomPosX(mt), randomPosY(mt));	// 목표물의 랜덤 목표 위치.
+
+	// 시야각의 cos 값은 최초 1회만 계산해 보관한다.
+	static float halfFovCos = cosf(Math::Deg2Rad(fovAngle * 0.5f));				// 플레이어의 정면과 플레이어 기준 목표물의 방향이 이루는 각이, 플레이어 시야각의 절반 각과 비교되기 때문.
+
+	elapsedTime = Math::Clamp(elapsedTime + InDeltaSeconds, 0.f, duration);		// 경과 시간이 duration을 넘지 않도록 clamp함.
+
+	// 지정한 시간이 경과하면 새로운 이동 지점을 랜덤하게 설정
+	if (elapsedTime == duration)
+	{
+		targetStart = targetDestination;
+		targetPosition = targetDestination;
+		targetDestination = Vector2(randomPosX(mt), randomPosY(mt));
+
+		elapsedTime = 0.f;
+	}
+	else // 비율에 따라 목표지점까지 선형보간하면서 이동
+	{
+		float ratio = elapsedTime / duration;
+
+		// Lerp함수를 통해 선형 보간 구현.
+		targetPosition = Vector2(
+			Math::Lerp(targetStart.X, targetDestination.X, ratio),
+			Math::Lerp(targetStart.Y, targetDestination.Y, ratio)
+		);
+	}
 
 	Vector2 inputVector = Vector2(input.GetAxis(InputAxis::XAxis), input.GetAxis(InputAxis::YAxis)).GetNormalize();
 	Vector2 deltaPosition = inputVector * moveSpeed * InDeltaSeconds;
-	float deltaScale = input.GetAxis(InputAxis::ZAxis) * scaleSpeed * InDeltaSeconds;
-	float deltaDegree = input.GetAxis(InputAxis::WAxis) * rotateSpeed * InDeltaSeconds;
+
+	Vector2 f = Vector2::UnitY;										// 플레이어 시야방향. 해당 실습에는 시야방향을 y축으로 고정.
+	Vector2 v = (targetPosition - playerPosition).GetNormalize();	// 플레이어 위치에서 목표물 위치로 가는 방향의 단위 벡터.
 
 	// 물체의 최종 상태 설정
-	currentPosition += deltaPosition;
-	currentScale = Math::Clamp(currentScale + deltaScale, scaleMin, scaleMax);
-	currentDegree += deltaDegree;
+	if (v.Dot(f) >= halfFovCos)										// 플레이어 시야 벡터와, 목표물 방향의 벡터 간의 내적값이 (시야각 % 2) 보다 클 경우 == 시야각 안에 목표물이 있는 경우.
+	{
+																	// 플레이어와 목표물의 색상을 Red로.
+		playerColor = LinearColor::Red;
+		targetColor = LinearColor::Red;
+	}
+	else
+	{
+																	// 내적값이 (시야각 % 2) 보다 작을 경우 == 시야각 외부에 목표물이 있는 경우.
+																	// 플레이어와 목표물 색상을 각각 Gray, Blue로.
+		playerColor = LinearColor::Gray;			
+		targetColor = LinearColor::Blue;
+	}
+	playerPosition += deltaPosition;
 }
 
 // 렌더링 로직을 담당하는 함수
@@ -89,82 +132,51 @@ void SoftRenderer::Render2D()
 	auto& r = GetRenderer();
 	const auto& g = Get2DGameEngine();
 
-	// 배경에 격자 그리기
-	DrawGizmo2D();
-
 	// 렌더링 로직의 로컬 변수
-	float rad = 0.f;
-	static float increment = 0.001f;
-	static std::vector<Vector2> hearts;
-	HSVColor hsv(0.f, 1.f, 0.85f);
+	static float radius = 5.f;									// 플레이어와 목표물을 표현할 원의 반지름.
+	static std::vector<Vector2> sphere;							// 플레이어와 목표물을 표현할 원.
+	static float sightLength = 300.f;							// 시야각 보조선 길이.
 
-	// 하트를 구성하는 점 생성
-	if (hearts.empty())
+
+	// 반지름을 기준으로 원의 점들 정의.
+	if (sphere.empty())
 	{
-		for (rad = 0.f; rad < Math::TwoPI; rad += increment)
+		for (float x = -radius; x <= radius; ++x)
 		{
-			float sin = sinf(rad);
-			float cos = cosf(rad);
-			float cos2 = cosf(2 * rad);
-			float cos3 = cosf(3 * rad);
-			float cos4 = cosf(4 * rad);
-			float x = 16.f * sin * sin * sin;
-			float y = 13 * cos - 5 * cos2 - 2 * cos3 - cos4;
-			hearts.push_back(Vector2(x, y));
+			for (float y = -radius; y <= radius; ++y)
+			{
+				Vector2 target(x, y);
+				float sizeSquared = target.SizeSquared();
+				float rr = radius * radius;
+				if (sizeSquared < rr)
+				{
+					sphere.push_back(target);
+				}
+			}
 		}
 	}
 
+	// 플레이어 렌더링. 
+	float halfFovSin = 0.f, halfFovCos = 0.f;
+	Math::GetSinCos(halfFovSin, halfFovCos, fovAngle * 0.5f);				// 시야각 보조선을 그리기 위해, 시야각 절반의 sin, cos 정의.
 
-	// ******************************* affine transformation matrix *************************************
-	// scaling matrix
-	Vector3 sBasis1(currentScale, 0.f, 0.f);
-	Vector3 sBasis2(0.f, currentScale, 0.f);
-	Vector3 sBasis3(0.f, 0.f, 1);
-	Matrix3x3 sMatrix(sBasis1, sBasis2, sBasis3);
-
-	// rotation matrix
-	float sin = 0.f;
-	float cos = 0.f;
-	Math::GetSinCos(sin, cos, currentDegree);
-	Vector3 rBasis1(cos, sin, 0.f);
-	Vector3 rBasis2(-sin, cos, 0.f);
-	Vector3 rBasis3(0.f, 0.f, 1.f);
-	Matrix3x3 rMatrix(rBasis1, rBasis2, rBasis3);
-
-	// translation matrix
-	// translate =	[1	0	a]
-	//				[0	1	b]
-	//				[0	0	1]
-	Vector3 tBasis1 = Vector3::UnitX;
-	Vector3 tBasis2 = Vector3::UnitY;
-	Vector3 tBasis3(currentPosition.X, currentPosition.Y, 1);
-	Matrix3x3 tMatrix(tBasis1, tBasis2, tBasis3);
-
-	// transformation matrix - 모든 affine 변환 행렬의 합성행렬. 
-	// (크기 변환, 회전 행렬)은 선형변환에 포함되기 때문에 순서가 바뀌어도 상관없지만 이동 행렬은 순서가 바뀌면 값이 바뀌게 된다.
-	// 직관적인 변환을 위해서는, 선형 변환을 먼저 수행 후 이동 변환을 실시한다. 													 
-	Matrix3x3 transformationMatrix = tMatrix * rMatrix * sMatrix;	// scaling -> rotation -> translation
-
-	// 각 값을 초기화한 후 동일하게 증가시키면서 색상 값을 지정
-	rad = 0.f;
-	for (auto const& v : hearts)
+	r.DrawLine(playerPosition, playerPosition + Vector2(sightLength * halfFovSin, sightLength * halfFovCos), playerColor);	// (sin, cos)이 y축 기준 우측상단으로 향하는 시야각 보조선의 단위벡터
+	r.DrawLine(playerPosition, playerPosition + Vector2(-sightLength * halfFovSin, sightLength * halfFovCos), playerColor); // (-sin, cos)이 y축 기준 좌측상단으로 향하는 시야각 보조선의 단위벡터
+	r.DrawLine(playerPosition, playerPosition + Vector2::UnitY * sightLength * 0.2f, playerColor);							// 플레이어 정면 벡터. y축 고정.
+	for (auto const& v : sphere)
 	{
-		// 최종 변환 행렬의 크기가 3x3이므로,
-		// 곱셈을 위해 하트를 구성하는 벡터를 3차원으로 변경
-		Vector3 newV(v.X, v.Y, 1);
-
-		// 아핀 변환을 적용하고 마지막 차원의 값을 제거하고 사용. (3x1이었던 좌표를 다시 2x1로.)
-		Vector3 finalV = transformationMatrix * newV;
-
-		hsv.H = rad / Math::TwoPI;
-		r.DrawPoint(finalV.ToVector2(), hsv.ToLinearColor());		// Vector3의 ToVector2()매서드를 통해 2차원으로 변환.
-		rad += increment;
+		r.DrawPoint(v + playerPosition, playerColor);
 	}
 
-	// 현재 위치, 크기, 각도를 화면에 출력
-	r.PushStatisticText(std::string("Position : ") + currentPosition.ToString());
-	r.PushStatisticText(std::string("Scale : ") + std::to_string(currentScale));
-	r.PushStatisticText(std::string("Degree : ") + std::to_string(currentDegree));
+	// 타겟 렌더링
+	for (auto const& v : sphere)
+	{
+		r.DrawPoint(v + targetPosition, targetColor);
+	}
+
+	// 주요 정보 출력
+	r.PushStatisticText(std::string("Player Position : ") + playerPosition.ToString());
+	r.PushStatisticText(std::string("Target Position : ") + targetPosition.ToString());
 }
 
 // 메시를 그리는 함수
