@@ -92,23 +92,19 @@ void SoftRenderer::Render2D()
 	// 배경에 격자 그리기
 	DrawGizmo2D();
 
-	// ***************************************** vertex를 통해 wireframe rendering 구현하기 **********************************
 	// 메시 데이터의 선언
-	static constexpr float squareHalfSize = 0.5;								// 두 개의 폴리곤을 이어붙여서 한 변의 길이가 1인 정사각형을 만든다. 이때, 한 변의 절반의 길이 저장.
-	static constexpr size_t vertexCount = 4;									// vertex가 총 4개 ( 사각형 4개의 꼭짓점)
-	static constexpr size_t triangleCount = 2;									// 총 polygon 수 2개.
+	static constexpr float squareHalfSize = 0.5f;
+	static constexpr size_t vertexCount = 4;
+	static constexpr size_t triangleCount = 2;
 
 	// 메시를 구성하는 정점 배열과 인덱스 배열의 생성
-	// vertex array - 각 정점의 정보 저장
 	static constexpr std::array<Vertex2D, vertexCount> rawVertices = {
-		Vertex2D(Vector2(-squareHalfSize, -squareHalfSize)),					// 좌측 하단 정점
-		Vertex2D(Vector2(squareHalfSize, -squareHalfSize)),						// 우측 하단 정점
-		Vertex2D(Vector2(squareHalfSize, squareHalfSize)),						// 우측 상단 정점
-		Vertex2D(Vector2(-squareHalfSize, squareHalfSize))						// 좌측 상단 정점
+		Vertex2D(Vector2(-squareHalfSize, -squareHalfSize)),
+		Vertex2D(Vector2(-squareHalfSize, squareHalfSize)),
+		Vertex2D(Vector2(squareHalfSize, squareHalfSize)),
+		Vertex2D(Vector2(squareHalfSize, -squareHalfSize))
 	};
 
-	// Index array - 각 polygon이 가지는 vertex의 인덱스 저장. 
-	// 이때, 인덱스 저장 순서는 삼각형 기준 반시계(Counter Clock Wise)
 	static constexpr std::array<size_t, triangleCount * 3> indices = {
 		0, 1, 2,
 		0, 2, 3
@@ -139,19 +135,80 @@ void SoftRenderer::Render2D()
 
 	// 행렬을 적용한 메시 정보를 사용해 물체를 렌더링
 	static std::vector<Vertex2D> vertices(vertexCount);
-	for (size_t vi = 0; vi < vertexCount; vi++)
+	for (size_t vi = 0; vi < vertexCount; ++vi)
 	{
-		vertices[vi].Position = finalMatrix * rawVertices[vi].Position;		// 모든 정점에 아핀 변환 적용.
+		vertices[vi].Position = finalMatrix * rawVertices[vi].Position;
 	}
 
 	// 변환된 정점을 잇는 선 그리기
-	for (size_t ti = 0; ti < triangleCount; ti++)
+	// *********************************************** 무게중심좌표(Barycentric coordinate)를 활용한 삼각형(polygon) 색칠하기 *****************************************
+	for (size_t ti = 0; ti < triangleCount; ++ti)
 	{
-		size_t bi = ti * 3;													// 한 삼각형을 그리는데 3개의 인덱스가 쓰이므로, 다음 삼각형을 그릴 때는 인덱스가 전보다 3 증가되어 있다.
-		// 각 정점들을 인덱스 순서에 맞게 선을 이음.
-		r.DrawLine(vertices[indices[bi]].Position, vertices[indices[bi + 1]].Position, _WireframeColor);
-		r.DrawLine(vertices[indices[bi+1]].Position, vertices[indices[bi + 2]].Position, _WireframeColor);
-		r.DrawLine(vertices[indices[bi+2]].Position, vertices[indices[bi]].Position, _WireframeColor);
+		size_t bi = ti * 3;
+
+		std::array<Vertex2D, 3> tv = { vertices[indices[bi]], vertices[indices[bi + 1]], vertices[indices[bi + 2]] };				// 각 polygon 별로 fragment 계산하도록 컨테이너에 저장.
+
+		// 해당 삼각형을 감싸는 범위(색을 칠해야 하는 fragment 후보군 범위)를 설정하기 위해, 
+		// 삼각형 세 꼭짓점 좌표 중 최댓값과 최솟값 구하기.
+		Vector2 minPos(Math::Min3(tv[0].Position.X, tv[1].Position.X, tv[2].Position.X), Math::Min3(tv[0].Position.Y, tv[1].Position.Y, tv[2].Position.Y));
+		Vector2 maxPos(Math::Max3(tv[0].Position.X, tv[1].Position.X, tv[2].Position.X), Math::Max3(tv[0].Position.Y, tv[1].Position.Y, tv[2].Position.Y));
+
+		// 무게중심좌표를 위한 준비작업
+		Vector2 u = tv[1].Position - tv[0].Position;		// 첫 번째 꼭짓점에서 두 번째를 향하는 벡터
+		Vector2 v = tv[2].Position - tv[0].Position;		// 첫 번째 꼭짓점에서 세 번째를 향하는 벡터
+
+		// 공통 분모 (uv * uv - uu*vv);
+		float udotv = u.Dot(v);
+		float udotu = u.Dot(u);
+		float vdotv = v.Dot(v);
+		float denominator = udotv * udotv - vdotv * udotu;
+
+		// 퇴화삼각형은 그리지 않음
+		// 해당 식의 분모가 0이라면, 계산에 사용된 삼각형의 두 벡터의 크기가 0이거나 꼭짓점 세 점이 한 직선 위에 있음.
+		if (denominator == 0.0f)
+		{
+			continue;
+		}
+
+		float invDenominator = 1.f / denominator;
+
+		// 화면 상의 점 구하기
+		// 좌측 하단 좌표 minPos와 우측 상단 좌표 maxPos의 화면 좌표계 값을 각각 구함.
+		ScreenPoint lowerLeftPoint = ScreenPoint::ToScreenCoordinate(_ScreenSize, minPos);
+		ScreenPoint upperRightPoint = ScreenPoint::ToScreenCoordinate(_ScreenSize, maxPos);
+
+		// 두 점이 화면 밖을 벗어나는 경우 클리핑 처리
+		lowerLeftPoint.X = Math::Max(0, lowerLeftPoint.X);
+		lowerLeftPoint.Y = Math::Min(_ScreenSize.Y, lowerLeftPoint.Y);
+		upperRightPoint.X = Math::Min(_ScreenSize.X, upperRightPoint.X);
+		upperRightPoint.Y = Math::Max(0, upperRightPoint.Y);
+
+		// 삼각형을 둘러싼 사각형 영역의 픽셀을 모두 순회
+		// 화면 좌표계는 좌상 자표계로, x축은 좌에서 우로, y축은 위에서 아래로 갈수록 값이 증가한다. - 이를 고려하여 반복문 작성.
+		for (int x = lowerLeftPoint.X; x <= upperRightPoint.X; ++x)
+		{
+			for (int y = upperRightPoint.Y; y <= lowerLeftPoint.Y; ++y)
+			{
+				ScreenPoint fragment = ScreenPoint(x, y);				// 처리할 화면 좌표 저장.
+				Vector2 pointToTest = fragment.ToCartesianCoordinate(_ScreenSize);	// 처리할 좌표를 데카르트 좌표계로 변환.
+				Vector2 w = pointToTest - tv[0].Position;				// 기준이 되는 삼각형 꼭짓점에서 확인할 지점을 향하는 벡터 정의.
+				float wdotu = w.Dot(u);
+				float wdotv = w.Dot(v);
+
+				// 분자 값을 구하고 최종 무게중심좌표 산출
+				float s = (wdotv * udotv - wdotu * vdotv) * invDenominator;
+				float t = (wdotu * udotv - wdotv * udotu) * invDenominator;
+				float oneMinusST = 1.f - s - t;
+
+				// 컨벡스 조건을 만족할 때만 점 찍기
+				// 컨벡스 조건 = 세 점의 아핀 결합 시, 각 스칼라 계수들은 모두 [0,1]의 값을 가져야 함.
+				// => 하나라도 [0,1]범위에서 벗어난다면 해당 점은, 계산에 기준이 되는 삼각형 내부에 존재하지 않는다.
+				if (((s >= 0.f) && (s <= 1.f)) && ((t >= 0.f) && (t <= 1.f)) && ((oneMinusST >= 0.f) && (oneMinusST <= 1.f)))
+				{
+					r.DrawPoint(fragment, LinearColor::Blue);
+				}
+			}
+		}
 	}
 
 	// 현재 위치, 크기, 각도를 화면에 출력
