@@ -120,7 +120,7 @@ private:
 	ScreenPoint _ScreenSize;
 
 	// 배경 색상
-	LinearColor _BackgroundColor = LinearColor::DimGray;
+	LinearColor _BackgroundColor = LinearColor::WhiteSmoke;
 
 	// 와이어프레임 색상
 	LinearColor _WireframeColor = LinearColor::DimGray;

@@ -53,9 +53,9 @@ void SoftRenderer::LoadScene2D()
 }
 
 // 게임 로직과 렌더링 로직이 공유하는 변수
-Vector2 lightPosition(200.f, 0.f);											// 광원 위치.
-LinearColor lightColor;														// 빛 색상.
-Vector2 circlePosition;														// 원 위치.
+Vector2 point(0.f, 250.f);									// 점의 위치.
+Vector2 lineStart(-400.f, 0.f);								// 점이 투영할 선의 시작점
+Vector2 lineEnd(400.f, 0.f);								// 점이 투영할 선의 끝점.
 
 // 게임 로직을 담당하는 함수
 void SoftRenderer::Update2D(float InDeltaSeconds)
@@ -65,29 +65,29 @@ void SoftRenderer::Update2D(float InDeltaSeconds)
 	const InputManager& input = g.GetInputManager();
 
 	// 게임 로직의 로컬 변수
-	static float duration = 20.f;
+	static float duration = 6.f;
 	static float elapsedTime = 0.f;
 	static float currentDegree = 0.f;
-	static float lightDistance = 200.f;
-	static HSVColor lightHSVColor;
+	static float rotateSpeed = 180.f;
+	static float distance = 250.f;
+	static std::random_device rd;											// 난수를 생성할 때 사용될 시드값을 얻음.
+	static std::mt19937 mt(rd());											// rt를 통해 생성한 시드값을 통해 난수를 생성하는 난수 생성 엔진 초기화.
+	static std::uniform_real_distribution<float> randomY(-200.f, 200.f);	// 200부터 200까지 균등하게 생성되도록 하는 실수 난수 생성 균등 분포 정의.
+																			// 이를 활용하여, 선을 구성하는 두 점의 y값 랜덤 생성.
+	elapsedTime = Math::Clamp(elapsedTime + InDeltaSeconds, 0.f, duration);
+	if (elapsedTime == duration)
+	{
+		// 난수 생성 함수를 통해, 선을 구성하는 두 점의 y값 랜덤 생성.
+		lineStart = Vector2(-400.f, randomY(mt));
+		lineEnd = Vector2(400.f, randomY(mt));
+		elapsedTime = 0.f;
+	}
 
-	// 경과 시간에 따른 현재 각과 이를 사용한 [0,1]값의 생성
-	elapsedTime += InDeltaSeconds;
-	elapsedTime = Math::FMod(elapsedTime, duration);						// mod 계산을 통해 경과 시간이 duration을 넘지 않도록 함. 
-	float currentRad = (elapsedTime / duration) * Math::TwoPI;				// 경과 시간에 비례하여 현재 각 계산. == radian 값.
-	float alpha = (sinf(currentRad) + 1) * 0.5f;							// sin함수를 활용하여 현재 각에 따른 [0,1]사이의 값 얻음.
-
-	// [0,1]을 활용해 주기적으로 크기를 반복하기
-	currentDegree = Math::Lerp(0.f, 360.f, alpha);							// Lerp를 통해, 위에서 구한 [0,1]값에 따른 currentDegree 값 보간. == (radian => degree) 값 변환
-
-	// 광원의 좌표와 색상
+	currentDegree = Math::FMod(currentDegree + rotateSpeed * InDeltaSeconds, 360.f);	// 주어진 각속도에 따른 현재 점의 위치 각도.
 	float sin = 0.f;
 	float cos = 0.f;
-	Math::GetSinCos(sin, cos, currentRad);
-	lightPosition = Vector2(cos, sin) * lightDistance;						// 각도에 따른 데카르트 좌표값({cos, sin})을 얻고 이에 길이를 곱해 최종 광원 위치 업데이트.
-
-	lightHSVColor.H = currentRad * Math::InvPI * 0.5f;						// 현재 각도를 360도로 나눠 [0,1] 값으로 정규화.
-	lightColor = lightHSVColor.ToLinearColor();								// HSV -> RGBA.
+	Math::GetSinCos(sin, cos, currentDegree);
+	point = Vector2(cos, sin) * distance;												// 현재 각도에 따른 단위 벡터를 구해 dist와 곱하여 데카르트 좌표값 계산.
 }
 
 // 렌더링 로직을 담당하는 함수
@@ -98,42 +98,19 @@ void SoftRenderer::Render2D()
 	const auto& g = Get2DGameEngine();
 
 	// 렌더링 로직의 로컬 변수
-	static std::vector<Vector2> light;
-	static float lightRadius = 10.f;
+	static float radius = 5.f;
 	static std::vector<Vector2> circle;
-	static float circleRadius = 50.f;
 
-	// 광원을 표현하는 구체
-	// 원 그리는 함수와 동일.
-	if (light.empty())
-	{
-		float lightRadius = 10.f;
-		for (float x = -lightRadius; x <= lightRadius; ++x)
-		{
-			for (float y = -lightRadius; y <= lightRadius; ++y)
-			{
-				Vector2 target(x, y);
-				float sizeSquared = target.SizeSquared();
-				float rr = lightRadius * lightRadius;
-				if (sizeSquared < rr)
-				{
-					light.push_back(target);
-				}
-			}
-		}
-	}
-
-	// 빛을 받는 물체
-	// 원 그리는 함수와 동일.
+	// 원 구성하는 로직을 사용하여 점 정의.
 	if (circle.empty())
 	{
-		for (float x = -circleRadius; x <= circleRadius; ++x)
+		for (float x = -radius; x <= radius; ++x)
 		{
-			for (float y = -circleRadius; y <= circleRadius; ++y)
+			for (float y = -radius; y <= radius; ++y)
 			{
 				Vector2 target(x, y);
 				float sizeSquared = target.SizeSquared();
-				float rr = circleRadius * circleRadius;
+				float rr = radius * radius;
 				if (sizeSquared < rr)
 				{
 					circle.push_back(target);
@@ -142,25 +119,36 @@ void SoftRenderer::Render2D()
 		}
 	}
 
-	// 광원 그리기
-	static float lightLineLength = 50.f;
-	r.DrawLine(lightPosition, lightPosition - lightPosition.GetNormalize() * lightLineLength, lightColor);			// 광원에서 물체를 향한 방향으로 50만큼의 길이의 선분 그리기.
-	for (auto const& v : light)
-	{
-		r.DrawPoint(v + lightPosition, lightColor);
-	}
-
-	// 광원을 받는 구체의 모든 픽셀에 NdotL을 계산해 음영을 산출하고 이를 최종 색상에 반영
+	// 붉은 색으로 점 그리기
 	for (auto const& v : circle)
 	{
-		Vector2 n = (v - circlePosition).GetNormalize();						// 원의 중심에서 원을 이루는 점을 바라보는 뱡향으로의 법선 벡터.
-		Vector2 l = (lightPosition - v).GetNormalize();							// 원을 이루는 점에서 광원을 바라보는 방향의 광원 벡터.
-		float shading = Math::Clamp(n.Dot(l), 0.f, 1.f);						// 두 벡터가 이루는 각에 따라 해당 물체의 해당 위치에 빛이 얼마나 받는지를 내적값(cos값)으로 계산.
-		r.DrawPoint(v, lightColor*shading);										// cos값([0,1])에 따라 광원의 세기 조절.
+		r.DrawPoint(v + point, LinearColor::Red);		// 원으로 된 점 그리기.
 	}
 
-	// 현재 조명의 위치를 화면에 출력
-	r.PushStatisticText(std::string("Position : ") + lightPosition.ToString());
+	// 투영할 라인 그리기
+	r.DrawLine(lineStart, lineEnd, LinearColor::Black);			// 점에서 투영할 선 그리기.
+	r.DrawLine(lineStart, point, LinearColor::Red);				// 점과 투영할 선의 각도를 표현할 선 그리기.
+
+	// 투영된 위치와 거리 계산
+	Vector2 unitV = (lineEnd - lineStart).GetNormalize();		// 투영할 선의 단위 벡터.
+	Vector2 u = point - lineStart;								// 벡터 v에 투영될 벡터 u.
+	Vector2 projV = unitV * (u.Dot(unitV));						// 벡터 v에 투영된 벡터. => 방향은 벡터 v이며 크기는 ||u||cos 이기 때문에, u는 정규화 하지 않고 u와 unitV의 내적값을 구하면 정사영 선의 길이가 된다.
+	Vector2 projectedPoint = lineStart + projV;					// 투영된 벡터의 시작점을 지정해줘서 최종적으로 투영된 벡터.
+	float distance = (projectedPoint - point).Size();			// 투영된 벡터에서 점까지의 거리를 구하면, 이 값은 해당 점과 선 사이의 거리가 된다.
+
+	// 투영된 점 그리기
+	for (auto const& v : circle)
+	{
+		r.DrawPoint(v + projectedPoint, LinearColor::Magenta);
+	}
+
+	// 투영 라인 그리기
+	r.DrawLine(projectedPoint, point, LinearColor::Gray);
+
+	// 관련 데이터 화면 출력
+	r.PushStatisticText("Point : " + point.ToString());
+	r.PushStatisticText("Projected Point : " + projectedPoint.ToString());
+	r.PushStatisticText("Distance : " + std::to_string(distance));
 }
 
 // 메시를 그리는 함수
