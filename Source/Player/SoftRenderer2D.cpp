@@ -54,7 +54,7 @@ void SoftRenderer::LoadScene2D()
 
 // 게임 로직과 렌더링 로직이 공유하는 변수
 Vector2 currentPosition;
-float currentScale = 100.f;
+float currentScale = 300.f;
 float currentDegree = 0.f;
 
 // 게임 로직을 담당하는 함수
@@ -66,8 +66,8 @@ void SoftRenderer::Update2D(float InDeltaSeconds)
 
 	// 게임 로직의 로컬 변수
 	static float moveSpeed = 100.f;
-	static float scaleMin = 50.f;
-	static float scaleMax = 200.f;
+	static float scaleMin = 200.f;
+	static float scaleMax = 400.f;
 	static float scaleSpeed = 100.f;
 	static float rotateSpeed = 180.f;
 
@@ -85,136 +85,133 @@ void SoftRenderer::Update2D(float InDeltaSeconds)
 // 렌더링 로직을 담당하는 함수
 void SoftRenderer::Render2D()
 {
-	// 렌더링 로직에서 사용하는 모듈 내 주요 레퍼런스
-	auto& r = GetRenderer();
-	const auto& g = Get2DGameEngine();
+    // 렌더링 로직에서 사용하는 모듈 내 주요 레퍼런스
+    auto& r = GetRenderer();
+    const auto& g = Get2DGameEngine();
 
-	// 배경에 격자 그리기
-	DrawGizmo2D();
+    // 배경에 격자 그리기
+    DrawGizmo2D();
 
-	// 메시 데이터의 선언
-	static constexpr float squareHalfSize = 0.5f;
-	static constexpr size_t vertexCount = 4;
-	static constexpr size_t triangleCount = 2;
+    // 메시 데이터의 선언
+    static constexpr size_t vertexCount = 3;
+    static constexpr size_t triangleCount = 1;
 
-	// 메시를 구성하는 정점 배열과 인덱스 배열의 생성
-	static constexpr std::array<Vertex2D, vertexCount> rawVertices = {
-		Vertex2D(Vector2(-squareHalfSize, -squareHalfSize)),
-		Vertex2D(Vector2(-squareHalfSize, squareHalfSize)),
-		Vertex2D(Vector2(squareHalfSize, squareHalfSize)),
-		Vertex2D(Vector2(squareHalfSize, -squareHalfSize))
-	};
+    // *********************************************************** vertex 정보에 색상까지 추가하여 각 fragment에 색상 입히기 ***************************************
+    // 메시를 구성하는 정점 배열과 인덱스 배열의 생성
+    // 삼각형 하나의 정점 정보.
+    static constexpr std::array<Vertex2D, vertexCount> rawVertices = {
+        // vertex array에 위치정보뿐만 아니라 색상정보까지 추가한다.
+        Vertex2D(Vector2(0.f, 0.25f), LinearColor(1.f, 0.f, 0.f)),
+        Vertex2D(Vector2(-0.5f, -0.25f), LinearColor(0.f, 1.f, 0.f)),
+        Vertex2D(Vector2(0.5f, -0.25f), LinearColor(0.f, 0.f, 1.f))
+    };
 
-	static constexpr std::array<size_t, triangleCount * 3> indices = {
-		0, 1, 2,
-		0, 2, 3
-	};
+    //삼각형 하나의 인덱스 정보.
+    static constexpr std::array<size_t, triangleCount * 3> indices = {
+        0, 2, 1
+    };
 
-	// 아핀 변환 행렬 ( 크기 ) 
-	Vector3 sBasis1(currentScale, 0.f, 0.f);
-	Vector3 sBasis2(0.f, currentScale, 0.f);
-	Vector3 sBasis3 = Vector3::UnitZ;
-	Matrix3x3 sMatrix(sBasis1, sBasis2, sBasis3);
+    // 아핀 변환 행렬 ( 크기 ) 
+    Vector3 sBasis1(currentScale, 0.f, 0.f);
+    Vector3 sBasis2(0.f, currentScale, 0.f);
+    Vector3 sBasis3 = Vector3::UnitZ;
+    Matrix3x3 sMatrix(sBasis1, sBasis2, sBasis3);
 
-	// 아핀 변환 행렬 ( 회전 ) 
-	float sin = 0.f, cos = 0.f;
-	Math::GetSinCos(sin, cos, currentDegree);
-	Vector3 rBasis1(cos, sin, 0.f);
-	Vector3 rBasis2(-sin, cos, 0.f);
-	Vector3 rBasis3 = Vector3::UnitZ;
-	Matrix3x3 rMatrix(rBasis1, rBasis2, rBasis3);
+    // 아핀 변환 행렬 ( 회전 ) 
+    float sin = 0.f, cos = 0.f;
+    Math::GetSinCos(sin, cos, currentDegree);
+    Vector3 rBasis1(cos, sin, 0.f);
+    Vector3 rBasis2(-sin, cos, 0.f);
+    Vector3 rBasis3 = Vector3::UnitZ;
+    Matrix3x3 rMatrix(rBasis1, rBasis2, rBasis3);
 
-	// 아핀 변환 행렬 ( 이동 ) 
-	Vector3 tBasis1 = Vector3::UnitX;
-	Vector3 tBasis2 = Vector3::UnitY;
-	Vector3 tBasis3(currentPosition.X, currentPosition.Y, 1.f);
-	Matrix3x3 tMatrix(tBasis1, tBasis2, tBasis3);
+    // 아핀 변환 행렬 ( 이동 ) 
+    Vector3 tBasis1 = Vector3::UnitX;
+    Vector3 tBasis2 = Vector3::UnitY;
+    Vector3 tBasis3(currentPosition.X, currentPosition.Y, 1.f);
+    Matrix3x3 tMatrix(tBasis1, tBasis2, tBasis3);
 
-	// 모든 아핀 변환을 곱한 합성 행렬. 크기-회전-이동 순으로 적용
-	Matrix3x3 finalMatrix = tMatrix * rMatrix * sMatrix;
+    // 모든 아핀 변환의 조합 행렬. 크기-회전-이동 순으로 조합
+    Matrix3x3 finalMatrix = tMatrix * rMatrix * sMatrix;
 
-	// 행렬을 적용한 메시 정보를 사용해 물체를 렌더링
-	static std::vector<Vertex2D> vertices(vertexCount);
-	for (size_t vi = 0; vi < vertexCount; ++vi)
-	{
-		vertices[vi].Position = finalMatrix * rawVertices[vi].Position;
-	}
+    // 행렬을 적용한 메시 정보를 사용해 물체를 렌더링
+    static std::vector<Vertex2D> vertices(vertexCount);
+    for (size_t vi = 0; vi < vertexCount; ++vi)
+    {
+        vertices[vi].Position = finalMatrix * rawVertices[vi].Position;
+        vertices[vi].Color = rawVertices[vi].Color;                     // 최종 vertex array에 색상정보 추가.
+    }
 
-	// 변환된 정점을 잇는 선 그리기
-	// *********************************************** 무게중심좌표(Barycentric coordinate)를 활용한 삼각형(polygon) 색칠하기 *****************************************
-	for (size_t ti = 0; ti < triangleCount; ++ti)
-	{
-		size_t bi = ti * 3;
+    // 변환된 정점을 잇는 선 그리기
+    for (size_t ti = 0; ti < triangleCount; ++ti)
+    {
+        size_t bi = ti * 3;
+        std::array<Vertex2D, 3> tv = { vertices[indices[bi]] , vertices[indices[bi + 1]], vertices[indices[bi + 2]] };
 
-		std::array<Vertex2D, 3> tv = { vertices[indices[bi]], vertices[indices[bi + 1]], vertices[indices[bi + 2]] };				// 각 polygon 별로 fragment 계산하도록 컨테이너에 저장.
+        Vector2 minPos(Math::Min3(tv[0].Position.X, tv[1].Position.X, tv[2].Position.X), Math::Min3(tv[0].Position.Y, tv[1].Position.Y, tv[2].Position.Y));
+        Vector2 maxPos(Math::Max3(tv[0].Position.X, tv[1].Position.X, tv[2].Position.X), Math::Max3(tv[0].Position.Y, tv[1].Position.Y, tv[2].Position.Y));
 
-		// 해당 삼각형을 감싸는 범위(색을 칠해야 하는 fragment 후보군 범위)를 설정하기 위해, 
-		// 삼각형 세 꼭짓점 좌표 중 최댓값과 최솟값 구하기.
-		Vector2 minPos(Math::Min3(tv[0].Position.X, tv[1].Position.X, tv[2].Position.X), Math::Min3(tv[0].Position.Y, tv[1].Position.Y, tv[2].Position.Y));
-		Vector2 maxPos(Math::Max3(tv[0].Position.X, tv[1].Position.X, tv[2].Position.X), Math::Max3(tv[0].Position.Y, tv[1].Position.Y, tv[2].Position.Y));
+        // 무게중심좌표를 위한 준비작업
+        Vector2 u = tv[1].Position - tv[0].Position;
+        Vector2 v = tv[2].Position - tv[0].Position;
 
-		// 무게중심좌표를 위한 준비작업
-		Vector2 u = tv[1].Position - tv[0].Position;		// 첫 번째 꼭짓점에서 두 번째를 향하는 벡터
-		Vector2 v = tv[2].Position - tv[0].Position;		// 첫 번째 꼭짓점에서 세 번째를 향하는 벡터
+        // 공통 분모 ( uu * vv - uv * uv )
+        float udotv = u.Dot(v);
+        float vdotv = v.Dot(v);
+        float udotu = u.Dot(u);
+        float denominator = udotv * udotv - vdotv * udotu;
 
-		// 공통 분모 (uv * uv - uu*vv);
-		float udotv = u.Dot(v);
-		float udotu = u.Dot(u);
-		float vdotv = v.Dot(v);
-		float denominator = udotv * udotv - vdotv * udotu;
+        // 퇴화삼각형은 그리지 않음
+        if (denominator == 0.0f)
+        {
+            continue;
+        }
 
-		// 퇴화삼각형은 그리지 않음
-		// 해당 식의 분모가 0이라면, 계산에 사용된 삼각형의 두 벡터의 크기가 0이거나 꼭짓점 세 점이 한 직선 위에 있음.
-		if (denominator == 0.0f)
-		{
-			continue;
-		}
+        float invDenominator = 1.f / denominator;
 
-		float invDenominator = 1.f / denominator;
+        // 화면상의 점 구하기
+        ScreenPoint lowerLeftPoint = ScreenPoint::ToScreenCoordinate(_ScreenSize, minPos);
+        ScreenPoint upperRightPoint = ScreenPoint::ToScreenCoordinate(_ScreenSize, maxPos);
 
-		// 화면 상의 점 구하기
-		// 좌측 하단 좌표 minPos와 우측 상단 좌표 maxPos의 화면 좌표계 값을 각각 구함.
-		ScreenPoint lowerLeftPoint = ScreenPoint::ToScreenCoordinate(_ScreenSize, minPos);
-		ScreenPoint upperRightPoint = ScreenPoint::ToScreenCoordinate(_ScreenSize, maxPos);
+        // 두 점이 화면 밖을 벗어나는 경우 클리핑 처리
+        lowerLeftPoint.X = Math::Max(0, lowerLeftPoint.X);
+        lowerLeftPoint.Y = Math::Min(_ScreenSize.Y, lowerLeftPoint.Y);
+        upperRightPoint.X = Math::Min(_ScreenSize.X, upperRightPoint.X);
+        upperRightPoint.Y = Math::Max(0, upperRightPoint.Y);
 
-		// 두 점이 화면 밖을 벗어나는 경우 클리핑 처리
-		lowerLeftPoint.X = Math::Max(0, lowerLeftPoint.X);
-		lowerLeftPoint.Y = Math::Min(_ScreenSize.Y, lowerLeftPoint.Y);
-		upperRightPoint.X = Math::Min(_ScreenSize.X, upperRightPoint.X);
-		upperRightPoint.Y = Math::Max(0, upperRightPoint.Y);
+        // 삼각형을 둘러싼 사각형 영역의 픽셀을 모두 순회
+        for (int x = lowerLeftPoint.X; x <= upperRightPoint.X; ++x)
+        {
+            for (int y = upperRightPoint.Y; y <= lowerLeftPoint.Y; ++y)
+            {
+                ScreenPoint fragment = ScreenPoint(x, y);
+                Vector2 pointToTest = fragment.ToCartesianCoordinate(_ScreenSize);
+                Vector2 w = pointToTest - tv[0].Position;
+                float wdotu = w.Dot(u);
+                float wdotv = w.Dot(v);
 
-		// 삼각형을 둘러싼 사각형 영역의 픽셀을 모두 순회
-		// 화면 좌표계는 좌상 자표계로, x축은 좌에서 우로, y축은 위에서 아래로 갈수록 값이 증가한다. - 이를 고려하여 반복문 작성.
-		for (int x = lowerLeftPoint.X; x <= upperRightPoint.X; ++x)
-		{
-			for (int y = upperRightPoint.Y; y <= lowerLeftPoint.Y; ++y)
-			{
-				ScreenPoint fragment = ScreenPoint(x, y);				// 처리할 화면 좌표 저장.
-				Vector2 pointToTest = fragment.ToCartesianCoordinate(_ScreenSize);	// 처리할 좌표를 데카르트 좌표계로 변환.
-				Vector2 w = pointToTest - tv[0].Position;				// 기준이 되는 삼각형 꼭짓점에서 확인할 지점을 향하는 벡터 정의.
-				float wdotu = w.Dot(u);
-				float wdotv = w.Dot(v);
+                // 분자 값을 구하고 최종 무게중심좌표 산출
+                float s = (wdotv * udotv - wdotu * vdotv) * invDenominator;
+                float t = (wdotu * udotv - wdotv * udotu) * invDenominator;
+                float oneMinusST = 1.f - s - t;
 
-				// 분자 값을 구하고 최종 무게중심좌표 산출
-				float s = (wdotv * udotv - wdotu * vdotv) * invDenominator;
-				float t = (wdotu * udotv - wdotv * udotu) * invDenominator;
-				float oneMinusST = 1.f - s - t;
+                // 컨벡스 조건을 만족할 때만 점 찍기
+                if (((s >= 0.f) && (s <= 1.f)) && ((t >= 0.f) && (t <= 1.f)) && ((oneMinusST >= 0.f) && (oneMinusST <= 1.f)))
+                {
+                    LinearColor outColor = tv[0].Color * oneMinusST + tv[1].Color * s + tv[2].Color * t;            // 삼각형의 내부 fragment는 세 정점의 아핀결합으로 만들어지며, 
+                                                                                                                    // 아핀결합의 세 스칼라계수는 총 합이 1이다.
+                                                                                                                    // 이는, 각 스칼라계수는 세 정점의 영향력 비율로 고려할 수 있으며 
+                                                                                                                    // 때문에, 해당 값들로 색상값을 보간할 수 있다. 
+                    r.DrawPoint(fragment, outColor);
+                }
+            }
+        }
+    }
 
-				// 컨벡스 조건을 만족할 때만 점 찍기
-				// 컨벡스 조건 = 세 점의 아핀 결합 시, 각 스칼라 계수들은 모두 [0,1]의 값을 가져야 함.
-				// => 하나라도 [0,1]범위에서 벗어난다면 해당 점은, 계산에 기준이 되는 삼각형 내부에 존재하지 않는다.
-				if (((s >= 0.f) && (s <= 1.f)) && ((t >= 0.f) && (t <= 1.f)) && ((oneMinusST >= 0.f) && (oneMinusST <= 1.f)))
-				{
-					r.DrawPoint(fragment, LinearColor::Blue);
-				}
-			}
-		}
-	}
-
-	// 현재 위치, 크기, 각도를 화면에 출력
-	r.PushStatisticText(std::string("Position : ") + currentPosition.ToString());
-	r.PushStatisticText(std::string("Scale : ") + std::to_string(currentScale));
-	r.PushStatisticText(std::string("Degree : ") + std::to_string(currentDegree));
+    // 현재 위치, 크기, 각도를 화면에 출력
+    r.PushStatisticText(std::string("Position : ") + currentPosition.ToString());
+    r.PushStatisticText(std::string("Scale : ") + std::to_string(currentScale));
+    r.PushStatisticText(std::string("Degree : ") + std::to_string(currentDegree));
 }
 
 // 메시를 그리는 함수
