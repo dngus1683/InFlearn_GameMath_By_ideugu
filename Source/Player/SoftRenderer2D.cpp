@@ -54,7 +54,7 @@ void SoftRenderer::LoadScene2D()
 
 // 게임 로직과 렌더링 로직이 공유하는 변수
 Vector2 currentPosition;
-float currentScale = 300.f;
+float currentScale = 200.f;
 float currentDegree = 0.f;
 
 // 게임 로직을 담당하는 함수
@@ -66,8 +66,8 @@ void SoftRenderer::Update2D(float InDeltaSeconds)
 
 	// 게임 로직의 로컬 변수
 	static float moveSpeed = 100.f;
-	static float scaleMin = 200.f;
-	static float scaleMax = 400.f;
+	static float scaleMin = 50.f;
+	static float scaleMax = 200.f;
 	static float scaleSpeed = 100.f;
 	static float rotateSpeed = 180.f;
 
@@ -89,26 +89,29 @@ void SoftRenderer::Render2D()
     auto& r = GetRenderer();
     const auto& g = Get2DGameEngine();
 
+    // ************************************************************ 텍스쳐 매핑하기 ******************************************************
+    const auto& texture = g.GetTexture(GameEngine::BaseTexture);        // 엔진으로부터 마인크래프트 텍스처 겍체의 레퍼런스를 받아옴.
+
     // 배경에 격자 그리기
     DrawGizmo2D();
 
     // 메시 데이터의 선언
-    static constexpr size_t vertexCount = 3;
-    static constexpr size_t triangleCount = 1;
+    static constexpr float squareHalfSize = 0.5f;
+    static constexpr size_t vertexCount = 4;
+    static constexpr size_t triangleCount = 2;
 
-    // *********************************************************** vertex 정보에 색상까지 추가하여 각 fragment에 색상 입히기 ***************************************
     // 메시를 구성하는 정점 배열과 인덱스 배열의 생성
-    // 삼각형 하나의 정점 정보.
     static constexpr std::array<Vertex2D, vertexCount> rawVertices = {
-        // vertex array에 위치정보뿐만 아니라 색상정보까지 추가한다.
-        Vertex2D(Vector2(0.f, 0.25f), LinearColor(1.f, 0.f, 0.f)),
-        Vertex2D(Vector2(-0.5f, -0.25f), LinearColor(0.f, 1.f, 0.f)),
-        Vertex2D(Vector2(0.5f, -0.25f), LinearColor(0.f, 0.f, 1.f))
+        // vertex array에 위치 및 색상 정보뿐만 아니라 각 정점에 매핑될 텍스쳐 좌표 정보도 저장한다. 색상 정보는 사용되지 않으므로 기본값을 저장한다.
+        Vertex2D(Vector2(-squareHalfSize, -squareHalfSize), LinearColor(), Vector2(0.125f, 0.75f)),
+        Vertex2D(Vector2(-squareHalfSize, squareHalfSize), LinearColor(), Vector2(0.125f, 0.875f)),
+        Vertex2D(Vector2(squareHalfSize, squareHalfSize), LinearColor(), Vector2(0.25f, 0.875f)),
+        Vertex2D(Vector2(squareHalfSize, -squareHalfSize), LinearColor(), Vector2(0.25f, 0.75f))
     };
 
-    //삼각형 하나의 인덱스 정보.
     static constexpr std::array<size_t, triangleCount * 3> indices = {
-        0, 2, 1
+        0, 1, 2,
+        0, 2, 3
     };
 
     // 아핀 변환 행렬 ( 크기 ) 
@@ -131,7 +134,7 @@ void SoftRenderer::Render2D()
     Vector3 tBasis3(currentPosition.X, currentPosition.Y, 1.f);
     Matrix3x3 tMatrix(tBasis1, tBasis2, tBasis3);
 
-    // 모든 아핀 변환의 조합 행렬. 크기-회전-이동 순으로 조합
+    // 모든 아핀 변환을 곱한 합성 행렬. 크기-회전-이동 순으로 적용
     Matrix3x3 finalMatrix = tMatrix * rMatrix * sMatrix;
 
     // 행렬을 적용한 메시 정보를 사용해 물체를 렌더링
@@ -139,7 +142,7 @@ void SoftRenderer::Render2D()
     for (size_t vi = 0; vi < vertexCount; ++vi)
     {
         vertices[vi].Position = finalMatrix * rawVertices[vi].Position;
-        vertices[vi].Color = rawVertices[vi].Color;                     // 최종 vertex array에 색상정보 추가.
+        vertices[vi].UV = rawVertices[vi].UV;                                       // 최종 vertex array에 텍스쳐 정보 추가.
     }
 
     // 변환된 정점을 잇는 선 그리기
@@ -198,11 +201,9 @@ void SoftRenderer::Render2D()
                 // 컨벡스 조건을 만족할 때만 점 찍기
                 if (((s >= 0.f) && (s <= 1.f)) && ((t >= 0.f) && (t <= 1.f)) && ((oneMinusST >= 0.f) && (oneMinusST <= 1.f)))
                 {
-                    LinearColor outColor = tv[0].Color * oneMinusST + tv[1].Color * s + tv[2].Color * t;            // 삼각형의 내부 fragment는 세 정점의 아핀결합으로 만들어지며, 
-                                                                                                                    // 아핀결합의 세 스칼라계수는 총 합이 1이다.
-                                                                                                                    // 이는, 각 스칼라계수는 세 정점의 영향력 비율로 고려할 수 있으며 
-                                                                                                                    // 때문에, 해당 값들로 색상값을 보간할 수 있다. 
-                    r.DrawPoint(fragment, outColor);
+                    Vector2 targetUV = tv[0].UV * oneMinusST + tv[1].UV * s + tv[2].UV * t;;            // 각 fragment에 색상정보를 보간한 방법과 동일하게
+                                                                                                        // UV값 역시 s,t,1-s-t의 값으로 삼각형 내의 아핀결합된 점들의 텍스쳐값을 보간한다.
+                    r.DrawPoint(fragment, texture.GetSample(targetUV));
                 }
             }
         }
