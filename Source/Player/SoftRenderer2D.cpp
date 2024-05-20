@@ -42,44 +42,81 @@ void SoftRenderer::DrawGizmo2D()
 }
 
 // 게임 오브젝트 목록
-
+static const std::string PlayerGo("Player");
 
 // 최초 씬 로딩을 담당하는 함수
 void SoftRenderer::LoadScene2D()
 {
-	// 최초 씬 로딩에서 사용하는 모듈 내 주요 레퍼런스
-	auto& g = Get2DGameEngine();
+    // 최초 씬 로딩에서 사용하는 모듈 내 주요 레퍼런스
+    auto& g = Get2DGameEngine();
 
+    // 플레이어의 생성과 설정
+    constexpr float playerScale = 30.f;
+    GameObject& goPlayer = g.CreateNewGameObject(PlayerGo);
+    goPlayer.SetMesh(GameEngine::QuadMesh);
+    goPlayer.GetTransform().SetScale(Vector2::One * playerScale);
+    goPlayer.SetColor(LinearColor::Red);
+
+    // 100개의 배경 게임 오브젝트 생성과 설정
+    char name[64];
+    constexpr float squareScale = 20.f;
+    std::mt19937 generator(0);
+    std::uniform_real_distribution<float> dist(-1000.f, 1000.f);
+    for (int i = 0; i < 100; ++i)
+    {
+        std::snprintf(name, sizeof(name), "GameObject%d", i);
+        GameObject& newGo = g.CreateNewGameObject(name);
+        newGo.GetTransform().SetPosition(Vector2(dist(generator), dist(generator)));
+        newGo.GetTransform().SetScale(Vector2::One * squareScale);
+        newGo.SetMesh(GameEngine::QuadMesh);
+        newGo.SetColor(LinearColor::Blue);
+    }
 }
-
-// 게임 로직과 렌더링 로직이 공유하는 변수
-Vector2 currentPosition;
-float currentScale = 200.f;
-float currentDegree = 0.f;
 
 // 게임 로직을 담당하는 함수
 void SoftRenderer::Update2D(float InDeltaSeconds)
 {
-	// 게임 로직에서 사용하는 모듈 내 주요 레퍼런스
-	auto& g = Get2DGameEngine();
-	const InputManager& input = g.GetInputManager();
+    // 게임 로직에서 사용하는 모듈 내 주요 레퍼런스
+    auto& g = Get2DGameEngine();
+    const InputManager& input = g.GetInputManager();
 
-	// 게임 로직의 로컬 변수
-	static float moveSpeed = 100.f;
-	static float scaleMin = 50.f;
-	static float scaleMax = 200.f;
-	static float scaleSpeed = 100.f;
-	static float rotateSpeed = 180.f;
+    // 게임 로직의 로컬 변수
+    static float moveSpeed = 200.f;
+    static float rotateSpeed = 180.f;
+    static float scaleMin = 15.f;
+    static float scaleMax = 30.f;
+    static float scaleSpeed = 180.f;
 
-	Vector2 inputVector = Vector2(input.GetAxis(InputAxis::XAxis), input.GetAxis(InputAxis::YAxis)).GetNormalize();
-	Vector2 deltaPosition = inputVector * moveSpeed * InDeltaSeconds;
-	float deltaScale = input.GetAxis(InputAxis::ZAxis) * scaleSpeed * InDeltaSeconds;
-	float deltaDegree = input.GetAxis(InputAxis::WAxis) * rotateSpeed * InDeltaSeconds;
+    // ************************************************ 카메라가 플레이어 쫓아다니기 ***************************************************
+    // 시각적 효과를 주기 위해 카메라가 플레이어를 쫓아다닐 때 한 템포 늦게 따라가는 래깅(Lagging) 효과 부여
+    static float minDistance = 1.f;                         // 카메가라 플레이어를 따라갈 때 래깅되는 거리
+    static float lerpSpeed = 2.f;                           // 플레이어가 카메라를 쫓아가는 속도 변수
 
-	// 물체의 최종 상태 설정
-	currentPosition += deltaPosition;
-	currentScale = Math::Clamp(currentScale + deltaScale, scaleMin, scaleMax);
-	currentDegree += deltaDegree;
+    // 플레이어에 대한 주요 레퍼런스
+    GameObject& goPlayer = g.GetGameObject(PlayerGo);                       // 플레이어의 게임 오브젝트 불러옴.
+    TransformComponent& transform = goPlayer.GetTransform();                // 플레이어의 트랜스폼(배치 정보) 불러옴.
+
+    // 입력에 따른 플레이어 위치와 크기의 변경
+    transform.AddPosition(Vector2(input.GetAxis(InputAxis::XAxis), input.GetAxis(InputAxis::YAxis)).GetNormalize() * moveSpeed * InDeltaSeconds);       // 입력에 따른 플레이어 위치 이동.
+    float newScale = Math::Clamp(transform.GetScale().X + scaleSpeed * input.GetAxis(InputAxis::ZAxis) * InDeltaSeconds, scaleMin, scaleMax);           
+    transform.SetScale(Vector2::One * newScale);
+    transform.AddRotation(input.GetAxis(InputAxis::WAxis) * rotateSpeed * InDeltaSeconds);                              // 입력에 따른 플레이어 회전.
+
+
+    // 플레이어를 따라다니는 카메라 트랜스폼
+    TransformComponent& cameraTransform = g.GetMainCamera().GetTransform();             // 카메라에 속한 트랜스폼 레퍼런스 가져옴.
+    Vector2 playerPos = transform.GetPosition();                                        // 플레이어의 현재 위치 불러옴.
+    Vector2 cameraPos = cameraTransform.GetPosition();                                  // 카메라의 현재 위치 불러옴.
+    if ((playerPos - cameraPos).SizeSquared() < minDistance * minDistance)              // 카메라와 플레이어 간의 거리가 minDistance보다 작으면 플레이어의 위치로 카메라를 가져옴.
+    {
+        cameraTransform.SetPosition(playerPos);
+    }
+    else
+    {
+        float ratio = Math::Clamp(lerpSpeed * InDeltaSeconds, 0.f, 1.f);                // 카메라의 이동 속도의 비율을 [0, 1] 사이로 죄어줌.
+        Vector2 newCameraPos = cameraPos + (playerPos - cameraPos) * ratio;             // 플레이어와 카메라 사이의 거리에 따른 카메라 속도 조절.
+        cameraTransform.SetPosition(newCameraPos);                                      // 카메라 위치 업데이트.
+    }
 }
 
 // 렌더링 로직을 담당하는 함수
@@ -88,91 +125,137 @@ void SoftRenderer::Render2D()
     // 렌더링 로직에서 사용하는 모듈 내 주요 레퍼런스
     auto& r = GetRenderer();
     const auto& g = Get2DGameEngine();
-
-    // ************************************************************ 텍스쳐 매핑하기 ******************************************************
-    const auto& texture = g.GetTexture(GameEngine::BaseTexture);        // 엔진으로부터 마인크래프트 텍스처 겍체의 레퍼런스를 받아옴.
+    const auto& texture = g.GetTexture(GameEngine::BaseTexture);
 
     // 배경에 격자 그리기
     DrawGizmo2D();
 
-    // 메시 데이터의 선언
-    static constexpr float squareHalfSize = 0.5f;
-    static constexpr size_t vertexCount = 4;
-    static constexpr size_t triangleCount = 2;
+    // 렌더링 로직의 로컬 변수
+    size_t totalObjectCount = g.GetScene().size();
+    Matrix3x3 viewMatrix = g.GetMainCamera().GetViewMatrix();                           // 카메라 뷰 행렬 가져옴.
 
-    // 메시를 구성하는 정점 배열과 인덱스 배열의 생성
-    static constexpr std::array<Vertex2D, vertexCount> rawVertices = {
-        // vertex array에 위치 및 색상 정보뿐만 아니라 각 정점에 매핑될 텍스쳐 좌표 정보도 저장한다. 색상 정보는 사용되지 않으므로 기본값을 저장한다.
-        Vertex2D(Vector2(-squareHalfSize, -squareHalfSize), LinearColor(), Vector2(0.125f, 0.75f)),
-        Vertex2D(Vector2(-squareHalfSize, squareHalfSize), LinearColor(), Vector2(0.125f, 0.875f)),
-        Vertex2D(Vector2(squareHalfSize, squareHalfSize), LinearColor(), Vector2(0.25f, 0.875f)),
-        Vertex2D(Vector2(squareHalfSize, -squareHalfSize), LinearColor(), Vector2(0.25f, 0.75f))
-    };
+    // 씬을 구성하는 모든 게임 오브젝트의 순회
+    for (auto it = g.SceneBegin(); it != g.SceneEnd(); ++it)
+    {
+        // 게임 오브젝트의 레퍼런스를 얻기
+        const GameObject& gameObject = *(*it);
+        if (!gameObject.HasMesh() || !gameObject.IsVisible())
+        {
+            continue;
+        }
 
-    static constexpr std::array<size_t, triangleCount * 3> indices = {
-        0, 1, 2,
-        0, 2, 3
-    };
+        // 렌더링에 필요한 게임 오브젝트의 주요 레퍼런스를 얻기
+        const Mesh& mesh = g.GetMesh(gameObject.GetMeshKey());
+        const TransformComponent& transform = gameObject.GetTransform();
+        Matrix3x3 finalMatrix = viewMatrix * transform.GetModelingMatrix();            // 뷰 행렬 x 모델링 행렬 = 최종 행렬. => 정점 변환에 사용.
 
-    // 아핀 변환 행렬 ( 크기 ) 
-    Vector3 sBasis1(currentScale, 0.f, 0.f);
-    Vector3 sBasis2(0.f, currentScale, 0.f);
-    Vector3 sBasis3 = Vector3::UnitZ;
-    Matrix3x3 sMatrix(sBasis1, sBasis2, sBasis3);
+        // 게임 오브젝트의 렌더링 수행
+        DrawMesh2D(mesh, finalMatrix, gameObject.GetColor());
 
-    // 아핀 변환 행렬 ( 회전 ) 
-    float sin = 0.f, cos = 0.f;
-    Math::GetSinCos(sin, cos, currentDegree);
-    Vector3 rBasis1(cos, sin, 0.f);
-    Vector3 rBasis2(-sin, cos, 0.f);
-    Vector3 rBasis3 = Vector3::UnitZ;
-    Matrix3x3 rMatrix(rBasis1, rBasis2, rBasis3);
+        // 플레이어의 정보를 화면에 출력
+        if (gameObject == PlayerGo)
+        {
+            r.PushStatisticText("Player Position : " + transform.GetPosition().ToString());
+            r.PushStatisticText("Player Rotation : " + std::to_string(transform.GetRotation()) + " (deg)");
+            r.PushStatisticText("Player Scale : " + std::to_string(transform.GetScale().X));
+        }
+    }
+}
 
-    // 아핀 변환 행렬 ( 이동 ) 
-    Vector3 tBasis1 = Vector3::UnitX;
-    Vector3 tBasis2 = Vector3::UnitY;
-    Vector3 tBasis3(currentPosition.X, currentPosition.Y, 1.f);
-    Matrix3x3 tMatrix(tBasis1, tBasis2, tBasis3);
+// 메시를 그리는 함수
+void SoftRenderer::DrawMesh2D(const class DD::Mesh& InMesh, const Matrix3x3& InMatrix, const LinearColor& InColor)
+{
+    // 메시의 구조를 파악하기 위한 로컬 변수
+    size_t vertexCount = InMesh.GetVertices().size();
+    size_t indexCount = InMesh.GetIndices().size();
+    size_t triangleCount = indexCount / 3;
 
-    // 모든 아핀 변환을 곱한 합성 행렬. 크기-회전-이동 순으로 적용
-    Matrix3x3 finalMatrix = tMatrix * rMatrix * sMatrix;
-
-    // 행렬을 적용한 메시 정보를 사용해 물체를 렌더링
-    static std::vector<Vertex2D> vertices(vertexCount);
+    // 메시 정보를 렌더러가 사용할 정점 버퍼와 인덱스 버퍼로 변환
+    std::vector<Vertex2D> vertices(vertexCount);
+    std::vector<size_t> indice(InMesh.GetIndices());
     for (size_t vi = 0; vi < vertexCount; ++vi)
     {
-        vertices[vi].Position = finalMatrix * rawVertices[vi].Position;
-        vertices[vi].UV = rawVertices[vi].UV;                                       // 최종 vertex array에 텍스쳐 정보 추가.
+        vertices[vi].Position = InMesh.GetVertices()[vi];
+        if (InMesh.HasColor())
+        {
+            vertices[vi].Color = InMesh.GetColors()[vi];
+        }
+
+        if (InMesh.HasUV())
+        {
+            vertices[vi].UV = InMesh.GetUVs()[vi];
+        }
     }
 
-    // 변환된 정점을 잇는 선 그리기
-    for (size_t ti = 0; ti < triangleCount; ++ti)
+    // 정점 변환 진행
+    VertexShader2D(vertices, InMatrix);
+
+    // 그리기모드 설정
+    FillMode fm = FillMode::None;
+    if (InMesh.HasColor())
     {
-        size_t bi = ti * 3;
-        std::array<Vertex2D, 3> tv = { vertices[indices[bi]] , vertices[indices[bi + 1]], vertices[indices[bi + 2]] };
+        fm |= FillMode::Color;
+    }
+    if (InMesh.HasUV())
+    {
+        fm |= FillMode::Texture;
+    }
 
-        Vector2 minPos(Math::Min3(tv[0].Position.X, tv[1].Position.X, tv[2].Position.X), Math::Min3(tv[0].Position.Y, tv[1].Position.Y, tv[2].Position.Y));
-        Vector2 maxPos(Math::Max3(tv[0].Position.X, tv[1].Position.X, tv[2].Position.X), Math::Max3(tv[0].Position.Y, tv[1].Position.Y, tv[2].Position.Y));
+    // 메시를 삼각형으로 쪼개서 각각 그리기
+    for (int ti = 0; ti < triangleCount; ++ti)
+    {
+        int bi0 = ti * 3, bi1 = ti * 3 + 1, bi2 = ti * 3 + 2;
+        std::vector<Vertex2D> tvs = { vertices[indice[bi0]] , vertices[indice[bi1]] , vertices[indice[bi2]] };
+        DrawTriangle2D(tvs, InColor, fm);
+    }
+}
 
-        // 무게중심좌표를 위한 준비작업
-        Vector2 u = tv[1].Position - tv[0].Position;
-        Vector2 v = tv[2].Position - tv[0].Position;
+// 삼각형을 그리는 함수
+void SoftRenderer::DrawTriangle2D(std::vector<DD::Vertex2D>& InVertices, const LinearColor& InColor, FillMode InFillMode)
+{
+    // 렌더링 로직에서 사용하는 모듈 내 주요 레퍼런스
+    auto& r = GetRenderer();
+    const GameEngine& g = Get2DGameEngine();
+    const Texture& texture = g.GetTexture(GameEngine::BaseTexture);
 
-        // 공통 분모 ( uu * vv - uv * uv )
+    if (IsWireframeDrawing())
+    {
+        // 와이어프레임으로 메시를 그리기
+        LinearColor finalColor = _WireframeColor;
+        if (InColor != LinearColor::Error)
+        {
+            finalColor = InColor;
+        }
+
+        r.DrawLine(InVertices[0].Position, InVertices[1].Position, finalColor);
+        r.DrawLine(InVertices[0].Position, InVertices[2].Position, finalColor);
+        r.DrawLine(InVertices[1].Position, InVertices[2].Position, finalColor);
+    }
+    else
+    {
+        // 삼각형 칠하기
+        // 삼각형의 영역 설정
+        Vector2 minPos(Math::Min3(InVertices[0].Position.X, InVertices[1].Position.X, InVertices[2].Position.X), Math::Min3(InVertices[0].Position.Y, InVertices[1].Position.Y, InVertices[2].Position.Y));
+        Vector2 maxPos(Math::Max3(InVertices[0].Position.X, InVertices[1].Position.X, InVertices[2].Position.X), Math::Max3(InVertices[0].Position.Y, InVertices[1].Position.Y, InVertices[2].Position.Y));
+
+        // 무게중심좌표를 위해 점을 벡터로 변환
+        Vector2 u = InVertices[1].Position - InVertices[0].Position;
+        Vector2 v = InVertices[2].Position - InVertices[0].Position;
+
+        // 공통 분모 값 ( uu * vv - uv * uv )
         float udotv = u.Dot(v);
         float vdotv = v.Dot(v);
         float udotu = u.Dot(u);
         float denominator = udotv * udotv - vdotv * udotu;
 
-        // 퇴화삼각형은 그리지 않음
-        if (denominator == 0.0f)
+        // 퇴화 삼각형이면 그리기 생략
+        if (denominator == 0.f)
         {
-            continue;
+            return;
         }
 
         float invDenominator = 1.f / denominator;
 
-        // 화면상의 점 구하기
         ScreenPoint lowerLeftPoint = ScreenPoint::ToScreenCoordinate(_ScreenSize, minPos);
         ScreenPoint upperRightPoint = ScreenPoint::ToScreenCoordinate(_ScreenSize, maxPos);
 
@@ -182,45 +265,26 @@ void SoftRenderer::Render2D()
         upperRightPoint.X = Math::Min(_ScreenSize.X, upperRightPoint.X);
         upperRightPoint.Y = Math::Max(0, upperRightPoint.Y);
 
-        // 삼각형을 둘러싼 사각형 영역의 픽셀을 모두 순회
+        // 삼각형 영역 내 모든 점을 점검하고 색칠
         for (int x = lowerLeftPoint.X; x <= upperRightPoint.X; ++x)
         {
             for (int y = upperRightPoint.Y; y <= lowerLeftPoint.Y; ++y)
             {
                 ScreenPoint fragment = ScreenPoint(x, y);
                 Vector2 pointToTest = fragment.ToCartesianCoordinate(_ScreenSize);
-                Vector2 w = pointToTest - tv[0].Position;
+                Vector2 w = pointToTest - InVertices[0].Position;
                 float wdotu = w.Dot(u);
                 float wdotv = w.Dot(v);
 
-                // 분자 값을 구하고 최종 무게중심좌표 산출
                 float s = (wdotv * udotv - wdotu * vdotv) * invDenominator;
                 float t = (wdotu * udotv - wdotv * udotu) * invDenominator;
                 float oneMinusST = 1.f - s - t;
-
-                // 컨벡스 조건을 만족할 때만 점 찍기
                 if (((s >= 0.f) && (s <= 1.f)) && ((t >= 0.f) && (t <= 1.f)) && ((oneMinusST >= 0.f) && (oneMinusST <= 1.f)))
                 {
-                    Vector2 targetUV = tv[0].UV * oneMinusST + tv[1].UV * s + tv[2].UV * t;;            // 각 fragment에 색상정보를 보간한 방법과 동일하게
-                                                                                                        // UV값 역시 s,t,1-s-t의 값으로 삼각형 내의 아핀결합된 점들의 텍스쳐값을 보간한다.
-                    r.DrawPoint(fragment, texture.GetSample(targetUV));
+                    Vector2 targetUV = InVertices[0].UV * oneMinusST + InVertices[1].UV * s + InVertices[2].UV * t;
+                    r.DrawPoint(fragment, FragmentShader2D(texture.GetSample(targetUV), LinearColor::White));
                 }
             }
         }
     }
-
-    // 현재 위치, 크기, 각도를 화면에 출력
-    r.PushStatisticText(std::string("Position : ") + currentPosition.ToString());
-    r.PushStatisticText(std::string("Scale : ") + std::to_string(currentScale));
-    r.PushStatisticText(std::string("Degree : ") + std::to_string(currentDegree));
-}
-
-// 메시를 그리는 함수
-void SoftRenderer::DrawMesh2D(const class DD::Mesh& InMesh, const Matrix3x3& InMatrix, const LinearColor& InColor)
-{
-}
-
-// 삼각형을 그리는 함수
-void SoftRenderer::DrawTriangle2D(std::vector<DD::Vertex2D>& InVertices, const LinearColor& InColor, FillMode InFillMode)
-{
 }
