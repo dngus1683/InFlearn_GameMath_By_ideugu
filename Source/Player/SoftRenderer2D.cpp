@@ -7,38 +7,38 @@ using namespace CK::DD;
 // 격자를 그리는 함수
 void SoftRenderer::DrawGizmo2D()
 {
-	auto& r = GetRenderer();
-	const auto& g = Get2DGameEngine();
+    auto& r = GetRenderer();
+    const auto& g = Get2DGameEngine();
 
-	// 그리드 색상
-	LinearColor gridColor(LinearColor(0.8f, 0.8f, 0.8f, 0.3f));
+    // 그리드 색상
+    LinearColor gridColor(LinearColor(0.8f, 0.8f, 0.8f, 0.3f));
 
-	// 뷰의 영역 계산
-	Vector2 viewPos = g.GetMainCamera().GetTransform().GetPosition();
-	Vector2 extent = Vector2(_ScreenSize.X * 0.5f, _ScreenSize.Y * 0.5f);
+    // 뷰의 영역 계산
+    Vector2 viewPos = g.GetMainCamera().GetTransform().GetPosition();
+    Vector2 extent = Vector2(_ScreenSize.X * 0.5f, _ScreenSize.Y * 0.5f);
 
-	// 좌측 하단에서부터 격자 그리기
-	int xGridCount = _ScreenSize.X / _Grid2DUnit;
-	int yGridCount = _ScreenSize.Y / _Grid2DUnit;
+    // 좌측 하단에서부터 격자 그리기
+    int xGridCount = _ScreenSize.X / _Grid2DUnit;
+    int yGridCount = _ScreenSize.Y / _Grid2DUnit;
 
-	// 그리드가 시작되는 좌하단 좌표 값 계산
-	Vector2 minPos = viewPos - extent;
-	Vector2 minGridPos = Vector2(ceilf(minPos.X / (float)_Grid2DUnit), ceilf(minPos.Y / (float)_Grid2DUnit)) * (float)_Grid2DUnit;
-	ScreenPoint gridBottomLeft = ScreenPoint::ToScreenCoordinate(_ScreenSize, minGridPos - viewPos);
+    // 그리드가 시작되는 좌하단 좌표 값 계산
+    Vector2 minPos = viewPos - extent;
+    Vector2 minGridPos = Vector2(ceilf(minPos.X / (float)_Grid2DUnit), ceilf(minPos.Y / (float)_Grid2DUnit)) * (float)_Grid2DUnit;
+    ScreenPoint gridBottomLeft = ScreenPoint::ToScreenCoordinate(_ScreenSize, minGridPos - viewPos);
 
-	for (int ix = 0; ix < xGridCount; ++ix)
-	{
-		r.DrawFullVerticalLine(gridBottomLeft.X + ix * _Grid2DUnit, gridColor);
-	}
+    for (int ix = 0; ix < xGridCount; ++ix)
+    {
+        r.DrawFullVerticalLine(gridBottomLeft.X + ix * _Grid2DUnit, gridColor);
+    }
 
-	for (int iy = 0; iy < yGridCount; ++iy)
-	{
-		r.DrawFullHorizontalLine(gridBottomLeft.Y - iy * _Grid2DUnit, gridColor);
-	}
+    for (int iy = 0; iy < yGridCount; ++iy)
+    {
+        r.DrawFullHorizontalLine(gridBottomLeft.Y - iy * _Grid2DUnit, gridColor);
+    }
 
-	ScreenPoint worldOrigin = ScreenPoint::ToScreenCoordinate(_ScreenSize, -viewPos);
-	r.DrawFullHorizontalLine(worldOrigin.Y, LinearColor::Red);
-	r.DrawFullVerticalLine(worldOrigin.X, LinearColor::Green);
+    ScreenPoint worldOrigin = ScreenPoint::ToScreenCoordinate(_ScreenSize, -viewPos);
+    r.DrawFullHorizontalLine(worldOrigin.Y, LinearColor::Red);
+    r.DrawFullVerticalLine(worldOrigin.X, LinearColor::Green);
 }
 
 // 게임 오브젝트 목록
@@ -86,36 +86,32 @@ void SoftRenderer::Update2D(float InDeltaSeconds)
     static float scaleMin = 15.f;
     static float scaleMax = 30.f;
     static float scaleSpeed = 180.f;
-
-    // ************************************************ 카메라가 플레이어 쫓아다니기 ***************************************************
-    // 시각적 효과를 주기 위해 카메라가 플레이어를 쫓아다닐 때 한 템포 늦게 따라가는 래깅(Lagging) 효과 부여
-    static float minDistance = 1.f;                         // 카메가라 플레이어를 따라갈 때 래깅되는 거리
-    static float lerpSpeed = 2.f;                           // 플레이어가 카메라를 쫓아가는 속도 변수
+    static float minDistance = 1.f;
+    static float lerpSpeed = 2.f;
 
     // 플레이어에 대한 주요 레퍼런스
-    GameObject& goPlayer = g.GetGameObject(PlayerGo);                       // 플레이어의 게임 오브젝트 불러옴.
-    TransformComponent& transform = goPlayer.GetTransform();                // 플레이어의 트랜스폼(배치 정보) 불러옴.
+    GameObject& goPlayer = g.GetGameObject(PlayerGo);
+    TransformComponent& transform = goPlayer.GetTransform();
 
     // 입력에 따른 플레이어 위치와 크기의 변경
-    transform.AddPosition(Vector2(input.GetAxis(InputAxis::XAxis), input.GetAxis(InputAxis::YAxis)).GetNormalize() * moveSpeed * InDeltaSeconds);       // 입력에 따른 플레이어 위치 이동.
-    float newScale = Math::Clamp(transform.GetScale().X + scaleSpeed * input.GetAxis(InputAxis::ZAxis) * InDeltaSeconds, scaleMin, scaleMax);           
+    transform.AddPosition(Vector2(input.GetAxis(InputAxis::XAxis), input.GetAxis(InputAxis::YAxis)).GetNormalize() * moveSpeed * InDeltaSeconds);
+    float newScale = Math::Clamp(transform.GetScale().X + scaleSpeed * input.GetAxis(InputAxis::ZAxis) * InDeltaSeconds, scaleMin, scaleMax);
     transform.SetScale(Vector2::One * newScale);
-    transform.AddRotation(input.GetAxis(InputAxis::WAxis) * rotateSpeed * InDeltaSeconds);                              // 입력에 따른 플레이어 회전.
+    transform.AddRotation(input.GetAxis(InputAxis::WAxis) * rotateSpeed * InDeltaSeconds);
 
-
-    // 플레이어를 따라다니는 카메라 트랜스폼
-    TransformComponent& cameraTransform = g.GetMainCamera().GetTransform();             // 카메라에 속한 트랜스폼 레퍼런스 가져옴.
-    Vector2 playerPos = transform.GetPosition();                                        // 플레이어의 현재 위치 불러옴.
-    Vector2 cameraPos = cameraTransform.GetPosition();                                  // 카메라의 현재 위치 불러옴.
-    if ((playerPos - cameraPos).SizeSquared() < minDistance * minDistance)              // 카메라와 플레이어 간의 거리가 minDistance보다 작으면 플레이어의 위치로 카메라를 가져옴.
+    // 플레이어를 따라다니는 카메라의 트랜스폼
+    TransformComponent& cameraTransform = g.GetMainCamera().GetTransform();
+    Vector2 playerPos = transform.GetPosition();
+    Vector2 cameraPos = cameraTransform.GetPosition();
+    if ((playerPos - cameraPos).SizeSquared() < minDistance * minDistance)
     {
         cameraTransform.SetPosition(playerPos);
     }
     else
     {
-        float ratio = Math::Clamp(lerpSpeed * InDeltaSeconds, 0.f, 1.f);                // 카메라의 이동 속도의 비율을 [0, 1] 사이로 죄어줌.
-        Vector2 newCameraPos = cameraPos + (playerPos - cameraPos) * ratio;             // 플레이어와 카메라 사이의 거리에 따른 카메라 속도 조절.
-        cameraTransform.SetPosition(newCameraPos);                                      // 카메라 위치 업데이트.
+        float ratio = Math::Clamp(lerpSpeed * InDeltaSeconds, 0.f, 1.f);
+        Vector2 newCameraPos = cameraPos + (playerPos - cameraPos) * ratio;
+        cameraTransform.SetPosition(newCameraPos);
     }
 }
 
@@ -132,7 +128,7 @@ void SoftRenderer::Render2D()
 
     // 렌더링 로직의 로컬 변수
     size_t totalObjectCount = g.GetScene().size();
-    Matrix3x3 viewMatrix = g.GetMainCamera().GetViewMatrix();                           // 카메라 뷰 행렬 가져옴.
+    Matrix3x3 viewMatrix = g.GetMainCamera().GetViewMatrix();
 
     // 씬을 구성하는 모든 게임 오브젝트의 순회
     for (auto it = g.SceneBegin(); it != g.SceneEnd(); ++it)
@@ -147,7 +143,7 @@ void SoftRenderer::Render2D()
         // 렌더링에 필요한 게임 오브젝트의 주요 레퍼런스를 얻기
         const Mesh& mesh = g.GetMesh(gameObject.GetMeshKey());
         const TransformComponent& transform = gameObject.GetTransform();
-        Matrix3x3 finalMatrix = viewMatrix * transform.GetModelingMatrix();            // 뷰 행렬 x 모델링 행렬 = 최종 행렬. => 정점 변환에 사용.
+        Matrix3x3 finalMatrix = viewMatrix * transform.GetModelingMatrix();
 
         // 게임 오브젝트의 렌더링 수행
         DrawMesh2D(mesh, finalMatrix, gameObject.GetColor());
