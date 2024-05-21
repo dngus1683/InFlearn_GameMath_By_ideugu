@@ -56,7 +56,9 @@ void SoftRenderer::LoadScene3D()
 	mainCamera.GetTransform().SetRotation(Rotator(180.f, 0.f, 0.f));
 }
 
-// 게임 로직과 렌더링 로직이 공유하는 변수
+// 실습 설정을 위한 변수
+// *********************************************************************** 백페이스 컬링 구현 ***********************************************************************************
+bool useBackfaceCulling = false;					// 백페이스 컬링의 전과 후를 비교하기 위한 변수
 
 // 게임 로직을 담당하는 함수
 void SoftRenderer::Update3D(float InDeltaSeconds)
@@ -69,22 +71,27 @@ void SoftRenderer::Update3D(float InDeltaSeconds)
 	static float moveSpeed = 500.f;
 	static float rotateSpeed = 180.f;
 
-	// ***************************************************************** 물체를 계속 바라보는 카메라 구현 *****************************************************
 	// 게임 로직에서 사용할 게임 오브젝트 레퍼런스
 	GameObject& goPlayer = g.GetGameObject(PlayerGo);
 	CameraObject& camera = g.GetMainCamera();
 	TransformComponent& playerTransform = goPlayer.GetTransform();
 
 	// 입력에 따른 플레이어 트랜스폼의 변경
-	Vector3 inputVector = Vector3(input.GetAxis(InputAxis::XAxis), input.GetAxis(InputAxis::YAxis), input.GetAxis(InputAxis::ZAxis)).GetNormalize();			// 입력을 통한 플레이어의 이동 방향 벡터 정의
-	playerTransform.AddPosition(inputVector * moveSpeed * InDeltaSeconds);																						// 정의된 방향 벡터에 대한 플레이어 이동.
-	playerTransform.AddPitchRotation(-input.GetAxis(InputAxis::WAxis) * rotateSpeed * InDeltaSeconds);															// 입력을 통한 플레이어 피치 회전.
+	Vector3 inputVector = Vector3(input.GetAxis(InputAxis::XAxis), input.GetAxis(InputAxis::YAxis), input.GetAxis(InputAxis::ZAxis)).GetNormalize();
+	playerTransform.AddPosition(inputVector * moveSpeed * InDeltaSeconds);
+	playerTransform.AddPitchRotation(-input.GetAxis(InputAxis::WAxis) * rotateSpeed * InDeltaSeconds);
 
 	// 입력에 따른 카메라 트랜스폼의 변경
-	camera.SetLookAtRotation(playerTransform.GetPosition());																									// 카메라가 항상 플레이어를 바라보도록 카메라에게 플레이어 위치 정보 전달.
+	camera.SetLookAtRotation(playerTransform.GetPosition());
 
+	// 실습 환경의 설정
+	if (input.IsReleased(InputButton::Space))
+	{
+		useBackfaceCulling = !useBackfaceCulling;			// space버튼이 눌러진 상태에서 떼어지면 백페이스 컬링 모드를 전환.
+	}
+	
 
-
+	// 다음 단계는 DrawTriangle3D()로 ~
 }
 
 // 애니메이션 로직을 담당하는 함수
@@ -187,6 +194,19 @@ void SoftRenderer::DrawTriangle3D(std::vector<Vertex3D>& InVertices, const Linea
 {
 	auto& r = GetRenderer();
 	const GameEngine& g = Get3DGameEngine();
+
+	if (useBackfaceCulling)					// 백페이스 컬링 모드에 따라 계산 할지 말지 결정.
+	{
+		// 벡페이스 컬링(뒷면이면 그리기 생략)
+		Vector3 edge1 = (InVertices[1].Position - InVertices[0].Position).ToVector3();		// 첫 번째 점에서 두 번째 점까지 가는 벡터 계산
+		Vector3 edge2 = (InVertices[2].Position - InVertices[0].Position).ToVector3();		// 첫 번째 점에서 세 번째 점까지 가는 벡터 계산
+		Vector3 faceNormal = edge1.Cross(edge2);											// 해당 폴리곤의 법선 백터를 구하기 위해 위 두 벡터 외적.
+		Vector3 viewDirectrion = -Vector3::UnitZ;											// 뷰 좌표계에서 카메라의 시선 벡터를 가져옴. 뷰 공간에서 카메라의 방향은 항상 -Z축을 가리킨다.
+		if (faceNormal.Dot(viewDirectrion) >= 0.f)											// 두 방향의 벡터를 내적하여, 두 벡터가 같은 곳을 바라보는지 판단.
+		{
+			return;
+		}
+	}
 
 	LinearColor finalColor = _WireframeColor;
 	if (InColor != LinearColor::Error)
