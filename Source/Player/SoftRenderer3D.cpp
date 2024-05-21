@@ -4,7 +4,14 @@
 #include <random>
 using namespace CK::DDD;
 
-// 기즈모를 그리는 함수
+
+// ********************************************************************************* 로드리게스 회전 공식을 활용한 3차원 공간에서의 자유로운 회전 ********************************************************
+// 로드리게스 회전에 관련된 변수 선언
+Vector3 n;						// 회전축 벡터.
+Vector3 right, forward;			// 회전축에 직교하는 두 벡터 정의.
+float thetaDegree = 0.f;		// 회전축에 대한 회전량. 각도법으로 사용.
+// 이 다음은 Update3D()
+
 void SoftRenderer::DrawGizmo3D()
 {
 	auto& r = GetRenderer();
@@ -29,6 +36,21 @@ void SoftRenderer::DrawGizmo3D()
 	r.DrawLine(v0, v1, LinearColor::Red);
 	r.DrawLine(v0, v2, LinearColor::Green);
 	r.DrawLine(v0, v3, LinearColor::Blue);
+
+	// 회전 축 그리기
+	static float axisLength = 150.f;
+	static float planeLength = 30.f;
+
+	Vector2 axisTo = (viewMatRotationOnly * n).ToVector2() * axisLength;
+	Vector2 axisFrom = -axisTo;
+	Vector2 rightTo = (viewMatRotationOnly * right).ToVector2() * planeLength;
+	Vector2 rightFrom = -rightTo;
+	Vector2 forwardTo = (viewMatRotationOnly * forward).ToVector2() * planeLength;
+	Vector2 forwardFrom = -forwardTo;
+
+	r.DrawLine(axisFrom, axisTo, LinearColor::Red);
+	r.DrawLine(rightFrom, rightTo, LinearColor::DimGray);
+	r.DrawLine(forwardFrom, forwardTo, LinearColor::DimGray);
 }
 
 // 게임 오브젝트 목록
@@ -45,7 +67,7 @@ void SoftRenderer::LoadScene3D()
 	// 플레이어 설정
 	GameObject& goPlayer = g.CreateNewGameObject(PlayerGo);
 	goPlayer.SetMesh(GameEngine::CubeMesh);
-	goPlayer.GetTransform().SetPosition(Vector3(-360.f, -250.f, 0.f));
+	goPlayer.GetTransform().SetPosition(Vector3::Zero);
 	goPlayer.GetTransform().SetScale(Vector3::One * playerScale);
 	goPlayer.GetTransform().SetRotation(Rotator(0.f, 0.f, 0.f));
 	goPlayer.SetColor(LinearColor::Blue);
@@ -57,8 +79,7 @@ void SoftRenderer::LoadScene3D()
 }
 
 // 실습 설정을 위한 변수
-// *********************************************************************** 백페이스 컬링 구현 ***********************************************************************************
-bool useBackfaceCulling = false;					// 백페이스 컬링의 전과 후를 비교하기 위한 변수
+bool useBackfaceCulling = false;
 
 // 게임 로직을 담당하는 함수
 void SoftRenderer::Update3D(float InDeltaSeconds)
@@ -68,30 +89,19 @@ void SoftRenderer::Update3D(float InDeltaSeconds)
 	const InputManager& input = g.GetInputManager();
 
 	// 게임 로직의 로컬 변수
-	static float moveSpeed = 500.f;
 	static float rotateSpeed = 180.f;
+	static Rotator axisRotator;					// 축을 회전시킬 rotator 정의
 
-	// 게임 로직에서 사용할 게임 오브젝트 레퍼런스
-	GameObject& goPlayer = g.GetGameObject(PlayerGo);
-	CameraObject& camera = g.GetMainCamera();
-	TransformComponent& playerTransform = goPlayer.GetTransform();
+	// 입력에 따른 회전축의 설정
+	axisRotator.Yaw += -input.GetAxis(InputAxis::XAxis) * rotateSpeed * InDeltaSeconds;
+	axisRotator.Pitch += -input.GetAxis(InputAxis::YAxis) * rotateSpeed * InDeltaSeconds;
+	axisRotator.Roll += -input.GetAxis(InputAxis::ZAxis) * rotateSpeed * InDeltaSeconds;
+	axisRotator.Clamp();
+	axisRotator.GetLocalAxes(right, n, forward);	// x축을 right, z축을 forward, 그리고 회전축은 y축으로 하였다.
+	thetaDegree = Math::FMod(thetaDegree + input.GetAxis(InputAxis::WAxis) * rotateSpeed * InDeltaSeconds, 360.f);		// 입력에 따른 회전량 조절.
 
-	// 입력에 따른 플레이어 트랜스폼의 변경
-	Vector3 inputVector = Vector3(input.GetAxis(InputAxis::XAxis), input.GetAxis(InputAxis::YAxis), input.GetAxis(InputAxis::ZAxis)).GetNormalize();
-	playerTransform.AddPosition(inputVector * moveSpeed * InDeltaSeconds);
-	playerTransform.AddPitchRotation(-input.GetAxis(InputAxis::WAxis) * rotateSpeed * InDeltaSeconds);
+	// 다음 단계: DrawMesh3D()
 
-	// 입력에 따른 카메라 트랜스폼의 변경
-	camera.SetLookAtRotation(playerTransform.GetPosition());
-
-	// 실습 환경의 설정
-	if (input.IsReleased(InputButton::Space))
-	{
-		useBackfaceCulling = !useBackfaceCulling;			// space버튼이 눌러진 상태에서 떼어지면 백페이스 컬링 모드를 전환.
-	}
-	
-
-	// 다음 단계는 DrawTriangle3D()로 ~
 }
 
 // 애니메이션 로직을 담당하는 함수
@@ -130,23 +140,22 @@ void SoftRenderer::Render3D()
 		const Mesh& mesh = g.GetMesh(gameObject.GetMeshKey());
 		const TransformComponent& transform = gameObject.GetTransform();
 
-		Matrix4x4 finalMatrix = vMatrix * transform.GetModelingMatrix();
+		Matrix4x4 finalMatrix = vMatrix;
 
 		// 메시 그리기
-		DrawMesh3D(mesh, finalMatrix, gameObject.GetColor());
+		DrawMesh3D(mesh, finalMatrix, gameObject.GetTransform().GetScale(), gameObject.GetColor());
 
-		// 월드 공간과 뷰 공간에서의 플레이어 위치를 화면에 표시
+		// 뷰 공간에서의 플레이어 위치를 화면에 표시
 		if (gameObject == PlayerGo)
 		{
-			Vector3 viewPosition = vMatrix * transform.GetPosition();
-			r.PushStatisticText("World: " + transform.GetPosition().ToString());
-			r.PushStatisticText("View : " + viewPosition.ToString());
+			r.PushStatisticText("Axis : " + n.ToString());
+			r.PushStatisticText("Degree : " + std::to_string(thetaDegree));
 		}
 	}
 }
 
 // 메시를 그리는 함수
-void SoftRenderer::DrawMesh3D(const Mesh& InMesh, const Matrix4x4& InMatrix, const LinearColor& InColor)
+void SoftRenderer::DrawMesh3D(const Mesh& InMesh, const Matrix4x4& InMatrix, const Vector3& InScale, const LinearColor& InColor)
 {
 	size_t vertexCount = InMesh.GetVertices().size();
 	size_t indexCount = InMesh.GetIndices().size();
@@ -171,7 +180,20 @@ void SoftRenderer::DrawMesh3D(const Mesh& InMesh, const Matrix4x4& InMatrix, con
 	}
 
 	// 정점 변환 진행
-	VertexShader3D(vertices, InMatrix);
+	for (Vertex3D& v : vertices)
+	{
+		// ************************************ 로드리게스 ***********************************************
+		// 로드리게스 공식 : 새로운 벡터 = u * cos + n * ((1.f - cos) * udotn) + ncrossu * sin
+		float sin = 0.f; 
+		float cos = 0.f;
+		Math::GetSinCos(sin, cos, thetaDegree);
+		Vector3 u = v.Position.ToVector3();
+		float udotn = u.Dot(n);
+		Vector3 ncrossu = n.Cross(u);
+		Vector3 result = Vector3(u * cos + n * ((1.f - cos) * udotn) + ncrossu * sin) * InScale;	// 로드리게스 공식 적용 후 크기 조절.
+
+		v.Position = InMatrix * Vector4(result);	// 월드 공간에서의 정점의 위치가 계산되면 뷰 행렬을 적용.
+	}
 
 	// 삼각형 별로 그리기
 	for (int ti = 0; ti < triangleCount; ++ti)
@@ -195,14 +217,14 @@ void SoftRenderer::DrawTriangle3D(std::vector<Vertex3D>& InVertices, const Linea
 	auto& r = GetRenderer();
 	const GameEngine& g = Get3DGameEngine();
 
-	if (useBackfaceCulling)					// 백페이스 컬링 모드에 따라 계산 할지 말지 결정.
+	if (useBackfaceCulling)
 	{
-		// 벡페이스 컬링(뒷면이면 그리기 생략)
-		Vector3 edge1 = (InVertices[1].Position - InVertices[0].Position).ToVector3();		// 첫 번째 점에서 두 번째 점까지 가는 벡터 계산
-		Vector3 edge2 = (InVertices[2].Position - InVertices[0].Position).ToVector3();		// 첫 번째 점에서 세 번째 점까지 가는 벡터 계산
-		Vector3 faceNormal = edge1.Cross(edge2);											// 해당 폴리곤의 법선 백터를 구하기 위해 위 두 벡터 외적.
-		Vector3 viewDirectrion = -Vector3::UnitZ;											// 뷰 좌표계에서 카메라의 시선 벡터를 가져옴. 뷰 공간에서 카메라의 방향은 항상 -Z축을 가리킨다.
-		if (faceNormal.Dot(viewDirectrion) >= 0.f)											// 두 방향의 벡터를 내적하여, 두 벡터가 같은 곳을 바라보는지 판단.
+		// 백페이스 컬링 ( 뒷면이면 그리기 생략 )
+		Vector3 edge1 = (InVertices[1].Position - InVertices[0].Position).ToVector3();
+		Vector3 edge2 = (InVertices[2].Position - InVertices[0].Position).ToVector3();
+		Vector3 faceNormal = edge1.Cross(edge2);
+		Vector3 viewDirection = -Vector3::UnitZ;
+		if (faceNormal.Dot(viewDirection) >= 0.f)
 		{
 			return;
 		}
